@@ -2,7 +2,7 @@ import argparse
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(prog="browser-bot-demo")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     run_parser = subparsers.add_parser("run")
