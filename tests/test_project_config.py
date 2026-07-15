@@ -116,6 +116,18 @@ def test_runtime_artifact_scan_allows_only_gitkeep_placeholders() -> None:
     assert "grep -vE '(^|/)(browser-profile|outputs|artifacts)/\\.gitkeep$'" in workflow
 
 
+def test_secret_scan_targets_credentials_not_public_hosts() -> None:
+    workflow = (
+        PROJECT_ROOT / ".github/workflows/core-offline.yml"
+    ).read_text(encoding="utf-8")
+    patterns_line = next(
+        line.strip() for line in workflow.splitlines() if line.strip().startswith("patterns=")
+    )
+    assert "sk-[A-Za-z0-9_-]{16,}" in patterns_line
+    assert "movie\\.douban\\.com" not in patterns_line
+    assert "api\\.minimax\\.com" not in patterns_line.casefold()
+
+
 def test_readme_documents_lightweight_live_gate_without_approval_evidence() -> None:
     readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
     assert "--live-approved" in readme

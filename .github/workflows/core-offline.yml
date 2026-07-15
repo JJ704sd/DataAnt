@@ -106,10 +106,9 @@ jobs:
       - name: Scan tracked tree for secret-like literals
         run: |
           set -e
-          # Match common live-provider hosts and high-entropy token prefixes.
-          # The audit must stay provider-agnostic; if a new live target is
-          # added, extend this list in the same commit that adds the path.
-          patterns='(sk-[A-Za-z0-9_-]{16,}|movie\.douban\.com|api\.minimax\.com|api\.MiniMax\.com)'
+          # Match high-entropy credential shapes, not public hostnames that
+          # legitimately appear in source code, fixtures, and documentation.
+          patterns='(sk-[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{35})'
           bad=$(git grep -nE "$patterns" || true)
           if [ -n "$bad" ]; then
             echo "::error::tracked secret / live-host reference detected:"
