@@ -1,1 +1,14 @@
 .worktrees/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.env
+playwright/.auth/*
+!playwright/.auth/.gitkeep
+outputs/*
+!outputs/.gitkeep
+artifacts/*
+!artifacts/.gitkeep
