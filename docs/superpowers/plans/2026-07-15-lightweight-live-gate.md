@@ -21,6 +21,8 @@
 - Modify `README.md`: new operator workflow and removal of independent approval language.
 - Modify `docs/superpowers/tasks/core-13-release-readiness.md`: release gate aligned with workbook-only validation.
 - Modify `tests/test_project_config.py`: offline CI remains forbidden from invoking live mode.
+- Modify `.github/workflows/core-offline.yml`: allow only tracked `.gitkeep` placeholders in runtime directories.
+- Create `AGENTS.md`: repository-level long-term live-run rules for future agents.
 
 ### Task 1: Enforce Explicit Live Authorization Before Browser Startup
 
@@ -456,6 +458,26 @@ def test_core_13_uses_workbook_only_release_evidence() -> None:
     assert "verify_controlled_workbook(workbook)" in spec
     assert "controlled-demo-evidence.json" not in spec
     assert "approval_reference" not in spec
+
+
+def test_repository_agent_rules_define_the_lightweight_live_gate() -> None:
+    rules = (PROJECT_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    for required in (
+        "--live-approved",
+        "--max-queries",
+        "--headed",
+        "--min-interval 5",
+        "BLOCKED",
+        "sec.douban.com",
+    ):
+        assert required in rules
+
+
+def test_runtime_artifact_scan_allows_only_gitkeep_placeholders() -> None:
+    workflow = (
+        PROJECT_ROOT / ".github/workflows/core-offline.yml"
+    ).read_text(encoding="utf-8")
+    assert "grep -vE '(^|/)(browser-profile|outputs|artifacts)/\\.gitkeep$'" in workflow
 ```
 
 Extend `test_core_ci_is_offline_and_runs_portable_verification()` with:
@@ -496,17 +518,56 @@ In `docs/superpowers/tasks/core-13-release-readiness.md`:
 - Keep the instruction that the release process itself never accesses live Douban.
 - Keep secret scan, runtime artifact scan, coverage, pip check, browser smoke, diff check, and readiness summary unchanged.
 
-- [ ] **Step 5: Run project-config tests and verify GREEN**
+- [ ] **Step 5: Fix the CI runtime-artifact false positive**
+
+In `.github/workflows/core-offline.yml`, change the runtime scan pipeline to:
+
+```bash
+bad=$(git ls-files | \
+      grep -E '(^|/)(browser-profile|outputs|artifacts)/.+$' | \
+      grep -vE '(^|/)(browser-profile|outputs|artifacts)/\.gitkeep$' || true)
+```
+
+This keeps all real runtime files forbidden while allowing the three intentional tracked placeholders.
+
+- [ ] **Step 6: Create repository-level long-term rules**
+
+Create root `AGENTS.md` with these binding project rules:
+
+```markdown
+# DataAnt Agent Rules
+
+## Real-network live runs
+
+- Real Douban access requires the operator's explicit `--live-approved` flag.
+- Every live command must include `--max-queries N`, where `1 <= N <= 10`.
+- Live runs must use `--headed` and `--min-interval 5` or greater.
+- Stop immediately on CAPTCHA, rate limiting, `sec.douban.com`, login security checks, or `BLOCKED`.
+- Never automate login, CAPTCHA solving, or site-protection bypasses.
+- Never use `--retry-status BLOCKED`.
+- Keep browser profiles, cookies, sessions, HTML, screenshots, logs, evidence, and workbooks out of Git.
+
+## Offline CI
+
+- CI must never invoke `--live-approved`, launch a live browser, or access `movie.douban.com`.
+- Only `.gitkeep` placeholders may be tracked under `browser-profile/`, `outputs/`, and `artifacts/`.
+
+## Scope
+
+These rules apply to the repository root and every subdirectory unless a more specific `AGENTS.md` strengthens them. A nested file may not weaken the real-network or artifact rules.
+```
+
+- [ ] **Step 7: Run project-config tests and verify GREEN**
 
 Run the Task 4 Step 2 command.
 
 Expected: all project configuration tests pass.
 
-- [ ] **Step 6: Commit documentation and CI contract**
+- [ ] **Step 8: Commit documentation, agent rules, and CI contract**
 
 ```powershell
-git add -- README.md docs/superpowers/tasks/core-13-release-readiness.md tests/test_project_config.py
-git commit -m "docs: replace approval evidence with live CLI gate"
+git add -- AGENTS.md README.md .github/workflows/core-offline.yml docs/superpowers/tasks/core-13-release-readiness.md tests/test_project_config.py
+git commit -m "docs: make lightweight live gate a repository rule"
 ```
 
 ### Task 5: Full Offline Verification
