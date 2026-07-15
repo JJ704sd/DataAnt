@@ -13,8 +13,8 @@
 ## Prerequisites and boundaries
 
 - Complete and verify `2026-07-15-browser-bot-core-demo.md` first.
-- Do not pass complete HTML, cookies, storage state, API keys, user data, reviews, or page screenshots to MiniMax.
-- LLM output is advisory. It never calls Playwright and never writes directly to Excel.
+- Do not pass complete HTML, cookies, browser-profile data, API keys, user data, reviews, or page screenshots to MiniMax.
+- LLM output is advisory. It never calls DrissionPage or any browser driver and never writes directly to Excel.
 - The accepted model is configured with `MINIMAX_MODEL`; do not assume the model name remains available forever. Confirm through MiniMax's official models endpoint before a real integration run.
 - Official references: `https://platform.minimax.io/docs/api-reference/text-openai-api` and `https://platform.minimax.io/docs/faq/about-apis`.
 
@@ -380,10 +380,10 @@ Add to README:
 
 Install with `python -m pip install -e ".[dev,llm]"`. Set `MINIMAX_API_KEY`,
 `MINIMAX_BASE_URL`, and `MINIMAX_MODEL` in the current process environment. Never
-place a real Key in `.env.example`, source control, Excel, logs, screenshots, or traces.
+place a real Key in `.env.example`, source control, Excel, logs, screenshots, HTML snapshots, or browser-profile files.
 
 The matcher sends only query text, optional year, and up to five candidate titles,
-years, and types. It does not send page HTML, cookies, storage state, or user data.
+years, and types. It does not send page HTML, cookies, browser-profile data, or user data.
 Any timeout, invalid JSON, out-of-range index, confidence below 0.85, or weak title
 relationship becomes REVIEW_REQUIRED.
 ```

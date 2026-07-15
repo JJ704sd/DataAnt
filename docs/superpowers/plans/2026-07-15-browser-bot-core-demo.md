@@ -4,9 +4,9 @@
 
 **Goal:** Build a deterministic Python Demo that enters movie queries in a visible browser, extracts a verified Douban movie match, and idempotently writes every outcome to an `.xlsx` workbook.
 
-**Architecture:** A CLI loads stable tasks from CSV and gives them to a serial runner. The runner owns retry/resume policy, while a Playwright session owns browser lifecycle, a Douban adapter owns site-specific actions/parsing, a pure matcher owns candidate selection, and an Excel store owns atomic upserts. Browser and storage interfaces remain injectable so most behavior is tested without live network access.
+**Architecture:** A CLI loads stable tasks from CSV and gives them to a serial runner. The runner owns retry/resume policy, while a DrissionPage session owns the local Chromium lifecycle, a Douban adapter owns site-specific actions/parsing, a pure matcher owns candidate selection, and an Excel store owns atomic upserts. Browser and storage interfaces remain injectable so most behavior is tested without live network access.
 
-**Tech Stack:** Python 3.11/3.12, Playwright Python sync API, openpyxl, pytest, pytest-cov, standard-library argparse/logging/dataclasses/pathlib.
+**Tech Stack:** Python 3.11/3.12, DrissionPage 4.1, installed Chrome/Edge, openpyxl, pytest, pytest-cov, standard-library argparse/logging/dataclasses/pathlib.
 
 ---
 
@@ -34,7 +34,7 @@ Non-negotiable invariants:
 - one stable `task_id` maps to at most one workbook row;
 - no silent drops and no first-result guessing;
 - no bypass of a block, challenge, or authorization boundary;
-- no secret in source, logs, workbook, screenshot, trace, or prompt;
+- no secret in source, logs, workbook, screenshot, HTML snapshot, browser profile, or prompt;
 - without network, login state, or LLM, deterministic logic and storage remain fully testable;
 - a failed optional subsystem degrades to a named status instead of corrupting data.
 
@@ -49,7 +49,7 @@ browser-bot-demo/
 │   ├── input_loader.py         # CSV validation and stable task IDs
 │   ├── matcher.py              # pure deterministic matching rules
 │   ├── excel_store.py          # workbook schema, idempotent upsert, atomic save
-│   ├── browser_session.py      # Playwright/context/page/trace lifecycle
+│   ├── browser_session.py      # DrissionPage Chromium/Tab/profile lifecycle
 │   ├── runner.py               # serial orchestration, retries, resume policy
 │   ├── diagnostics.py          # redacted logging and failure artifacts
 │   └── sites/
@@ -70,7 +70,7 @@ browser-bot-demo/
 ├── inputs/queries.example.csv
 ├── outputs/.gitkeep
 ├── artifacts/.gitkeep
-├── playwright/.auth/.gitkeep
+├── browser-profile/.gitkeep
 ├── .env.example
 ├── .gitignore
 ├── pyproject.toml
@@ -87,7 +87,7 @@ The following names are fixed for all tasks:
 - `MovieResult.from_task(task, ...)`
 - `Status`: `SUCCESS`, `NOT_FOUND`, `REVIEW_REQUIRED`, `NETWORK_ERROR`, `PAGE_CHANGED`, `BLOCKED`, `OUTPUT_LOCKED`, `UNEXPECTED_ERROR`
 - `MatchMethod`: `RULE_EXACT`, `RULE_YEAR`, `LLM`, `NONE`
-- `DoubanMovieAdapter.search(page, task)` and `DoubanMovieAdapter.fetch_detail(page, task, candidate)`
+- `DoubanMovieAdapter.search(tab, task)` and `DoubanMovieAdapter.fetch_detail(tab, task, candidate)`
 - `ExcelStore.upsert(result)` and `ExcelStore.status_by_task_id()`
 - `Runner.run(tasks)` returns a `RunSummary`
 
@@ -103,7 +103,7 @@ The following names are fixed for all tasks:
 - Create: `.env.example`
 - Create: `outputs/.gitkeep`
 - Create: `artifacts/.gitkeep`
-- Create: `playwright/.auth/.gitkeep`
+- Create: `browser-profile/.gitkeep`
 - Test: `tests/test_main.py`
 
 - [ ] **Step 1: Initialize Git and create the empty directory tree**
@@ -112,7 +112,7 @@ Run:
 
 ```powershell
 git init
-New-Item -ItemType Directory -Force app, app\sites, tests, tests\fixtures, inputs, outputs, artifacts, playwright\.auth
+New-Item -ItemType Directory -Force app, app\sites, tests, tests\fixtures, inputs, outputs, artifacts, browser-profile
 ```
 
 Expected: Git reports an initialized repository and every directory exists.
@@ -131,7 +131,7 @@ name = "browser-bot-demo"
 version = "0.1.0"
 requires-python = ">=3.11,<3.13"
 dependencies = [
-  "playwright>=1.50,<2",
+  "DrissionPage>=4.1.1,<4.2",
   "openpyxl>=3.1,<4",
 ]
 
@@ -153,8 +153,8 @@ __pycache__/
 .coverage
 htmlcov/
 .env
-playwright/.auth/*
-!playwright/.auth/.gitkeep
+browser-profile/*
+!browser-profile/.gitkeep
 outputs/*
 !outputs/.gitkeep
 artifacts/*
@@ -238,7 +238,6 @@ Run:
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev]"
-python -m playwright install chromium
 python -m pytest tests/test_main.py -v
 ```
 
@@ -247,7 +246,7 @@ Expected: PASS, and Chromium installation exits with code 0.
 - [ ] **Step 5: Commit the skeleton**
 
 ```powershell
-git add .gitignore pyproject.toml app tests inputs outputs artifacts playwright .env.example
+git add .gitignore pyproject.toml app tests inputs outputs artifacts browser-profile .env.example
 git commit -m "chore: initialize browser bot demo"
 ```
 
@@ -777,7 +776,7 @@ python -m pytest tests/test_douban_parser.py -v
 
 Expected: FAIL because `DoubanMovieAdapter` does not exist.
 
-- [ ] **Step 4: Implement pure HTML parsing through Playwright DOM in a temporary page**
+- [ ] **Step 4: Implement pure HTML parsing without a browser process**
 
 Create `app/sites/douban_movie.py` with pure helpers backed by the standard-library HTML parser, keeping live Page methods for Task 6:
 
@@ -786,31 +785,12 @@ from __future__ import annotations
 
 import re
 from dataclasses import replace
-from html.parser import HTMLParser
 
 from app.models import Candidate, MatchMethod, MovieResult, Status, Task
 
 
 DETAIL_URL = re.compile(r"^https://movie\.douban\.com/subject/\d+/$")
 BLOCK_TEXT = ("访问频率过高", "异常请求", "验证码")
-
-
-class _Collector(HTMLParser):
-    def __init__(self) -> None:
-        super().__init__()
-        self.stack: list[tuple[str, dict[str, str]]] = []
-        self.items: list[tuple[list[tuple[str, dict[str, str]]], str]] = []
-
-    def handle_starttag(self, tag: str, attrs) -> None:
-        self.stack.append((tag, dict(attrs)))
-
-    def handle_endtag(self, tag: str) -> None:
-        if self.stack:
-            self.stack.pop()
-
-    def handle_data(self, data: str) -> None:
-        if data.strip():
-            self.items.append((self.stack.copy(), data.strip()))
 
 
 class DoubanMovieAdapter:
@@ -859,11 +839,12 @@ git add app/sites/douban_movie.py tests/fixtures tests/test_douban_parser.py
 git commit -m "feat: add fixture-backed Douban parsing"
 ```
 
-### Task 6: Add Playwright browser lifecycle and live UI actions
+### Task 6: Add DrissionPage browser lifecycle and live UI actions
 
 **Files:**
 - Create: `app/browser_session.py`
 - Modify: `app/sites/douban_movie.py`
+- Test: `tests/test_browser_session.py`
 - Test: `tests/test_douban_parser.py`
 
 - [ ] **Step 1: Add a failing URL canonicalization and locator-contract test**
@@ -872,8 +853,10 @@ Append to `tests/test_douban_parser.py`:
 
 ```python
 def test_adapter_exposes_a_small_locator_contract() -> None:
-    assert DoubanMovieAdapter.SEARCH_INPUTS[0][0] == "role"
-    assert "input[name='search_text']" in [value for _, value in DoubanMovieAdapter.SEARCH_INPUTS]
+    assert DoubanMovieAdapter.SEARCH_INPUTS == (
+        "@role=searchbox",
+        "css:input[name='search_text']",
+    )
 ```
 
 Run:
@@ -884,6 +867,29 @@ python -m pytest tests/test_douban_parser.py::test_adapter_exposes_a_small_locat
 
 Expected: FAIL because `SEARCH_INPUTS` is undefined.
 
+Create `tests/test_browser_session.py` before implementing the session:
+
+```python
+from pathlib import Path
+
+import pytest
+
+from app.browser_session import find_browser_executable
+
+
+def test_explicit_browser_path_is_used(tmp_path: Path) -> None:
+    executable = tmp_path / "chrome.exe"
+    executable.touch()
+    assert find_browser_executable(executable) == executable
+
+
+def test_missing_explicit_browser_is_rejected(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError):
+        find_browser_executable(tmp_path / "missing.exe")
+```
+
+Run `python -m pytest tests/test_browser_session.py -v` and confirm collection fails because `app.browser_session` does not exist.
+
 - [ ] **Step 2: Implement the browser session context manager**
 
 Create `app/browser_session.py`:
@@ -893,36 +899,62 @@ from __future__ import annotations
 
 from contextlib import AbstractContextManager
 from pathlib import Path
+import socket
 
-from playwright.sync_api import Browser, BrowserContext, Page, Playwright, sync_playwright
+from DrissionPage import Chromium, ChromiumOptions
 
 
-class BrowserSession(AbstractContextManager[Page]):
-    def __init__(self, headed: bool, artifacts_dir: Path, storage_state: Path | None = None) -> None:
+WINDOWS_BROWSER_PATHS = (
+    Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe"),
+    Path(r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe"),
+)
+
+
+def find_browser_executable(explicit: Path | None = None) -> Path:
+    candidates = (explicit,) if explicit is not None else WINDOWS_BROWSER_PATHS
+    for candidate in candidates:
+        if candidate is not None and candidate.is_file():
+            return candidate
+    raise FileNotFoundError("Chrome or Edge executable was not found")
+
+
+def _free_local_port() -> int:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
+
+
+class BrowserSession(AbstractContextManager[object]):
+    def __init__(
+        self,
+        headed: bool,
+        artifacts_dir: Path,
+        profile_dir: Path,
+        browser_path: Path | None = None,
+    ) -> None:
         self.headed = headed
         self.artifacts_dir = artifacts_dir
-        self.storage_state = storage_state
-        self._playwright: Playwright | None = None
-        self._browser: Browser | None = None
-        self._context: BrowserContext | None = None
+        self.profile_dir = profile_dir
+        self.browser_path = browser_path
+        self._browser: Chromium | None = None
 
-    def __enter__(self) -> Page:
+    def __enter__(self):
         self.artifacts_dir.mkdir(parents=True, exist_ok=True)
-        self._playwright = sync_playwright().start()
-        self._browser = self._playwright.chromium.launch(headless=not self.headed)
-        kwargs = {"storage_state": str(self.storage_state)} if self.storage_state and self.storage_state.exists() else {}
-        self._context = self._browser.new_context(**kwargs)
-        self._context.tracing.start(screenshots=True, snapshots=True, sources=False)
-        return self._context.new_page()
+        self.profile_dir.mkdir(parents=True, exist_ok=True)
+        options = (
+            ChromiumOptions()
+            .set_browser_path(find_browser_executable(self.browser_path))
+            .set_local_port(_free_local_port())
+            .set_user_data_path(self.profile_dir)
+        )
+        if not self.headed:
+            options.headless()
+        self._browser = Chromium(addr_or_opts=options)
+        return self._browser.latest_tab
 
     def __exit__(self, exc_type, exc, traceback) -> None:
-        if self._context:
-            self._context.tracing.stop(path=self.artifacts_dir / "trace.zip")
-            self._context.close()
         if self._browser:
-            self._browser.close()
-        if self._playwright:
-            self._playwright.stop()
+            self._browser.quit()
 ```
 
 - [ ] **Step 3: Add live search and detail methods to the adapter**
@@ -930,7 +962,7 @@ class BrowserSession(AbstractContextManager[Page]):
 Add these imports and methods to `DoubanMovieAdapter`:
 
 ```python
-from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError
+from DrissionPage.common import wait_until
 
 
 class BlockedError(RuntimeError):
@@ -941,40 +973,48 @@ class PageChangedError(RuntimeError):
     pass
 
 
+class NetworkError(RuntimeError):
+    pass
+
+
 class DoubanMovieAdapter:
     SEARCH_INPUTS = (
-        ("role", "searchbox"),
-        ("css", "input[name='search_text']"),
+        "@role=searchbox",
+        "css:input[name='search_text']",
     )
 
-    def _search_input(self, page: Page):
-        for kind, value in self.SEARCH_INPUTS:
-            locator = page.get_by_role(value) if kind == "role" else page.locator(value)
-            if locator.count() == 1:
-                return locator
+    def _search_input(self, tab):
+        for locator in self.SEARCH_INPUTS:
+            element = tab.ele(locator, timeout=1)
+            if element:
+                return element
         raise PageChangedError("Search input was not found")
 
-    def search(self, page: Page, task: Task) -> list[Candidate]:
-        response = page.goto("https://movie.douban.com/", wait_until="domcontentloaded", timeout=20_000)
-        status = response.status if response else None
-        if self.is_blocked(page.content(), status):
+    def search(self, tab, task: Task) -> list[Candidate]:
+        if not tab.get("https://movie.douban.com/", retry=0, timeout=20):
+            raise NetworkError("Douban navigation failed")
+        if self.is_blocked(tab.html, None):
             raise BlockedError("Douban blocked the batch")
-        search_input = self._search_input(page)
-        search_input.fill(task.query)
-        search_input.press("Enter")
-        page.wait_for_load_state("domcontentloaded")
-        html = page.content()
+        self._search_input(tab).input(f"{task.query}\n", clear=True)
+        try:
+            wait_until(
+                lambda: bool(tab.ele("css:.result-list", timeout=0)) or "没有找到" in tab.html,
+                timeout=10,
+            )
+        except TimeoutError as exc:
+            raise PageChangedError("Search result marker was not found") from exc
+        html = tab.html
         if self.is_blocked(html, None):
             raise BlockedError("Douban blocked the batch")
         return self.parse_search_html(html)
 
-    def fetch_detail(self, page: Page, task: Task, candidate: Candidate) -> MovieResult:
-        response = page.goto(candidate.detail_url, wait_until="domcontentloaded", timeout=20_000)
-        status = response.status if response else None
-        html = page.content()
-        if self.is_blocked(html, status):
+    def fetch_detail(self, tab, task: Task, candidate: Candidate) -> MovieResult:
+        if not tab.get(candidate.detail_url, retry=0, timeout=20):
+            raise NetworkError("Douban detail navigation failed")
+        html = tab.html
+        if self.is_blocked(html, None):
             raise BlockedError("Douban blocked the batch")
-        return self.parse_detail_html(html, task, page.url)
+        return self.parse_detail_html(html, task, tab.url)
 ```
 
 Do not add `time.sleep()` for page synchronization. The runner adds a request interval separately.
@@ -983,16 +1023,16 @@ Do not add `time.sleep()` for page synchronization. The runner adds a request in
 
 ```powershell
 python -m pytest tests/test_douban_parser.py -v
-python -c "from playwright.sync_api import sync_playwright; p=sync_playwright().start(); b=p.chromium.launch(headless=True); print(b.version); b.close(); p.stop()"
+python -c "from pathlib import Path; from app.browser_session import BrowserSession; s=BrowserSession(True, Path('artifacts'), Path('browser-profile/smoke')); t=s.__enter__(); print(t.url); s.__exit__(None,None,None)"
 ```
 
-Expected: parser tests PASS and the command prints a Chromium version.
+Expected: parser tests PASS, a visible installed Chrome/Edge opens, and the command exits 0. Delete `browser-profile/smoke/` after the check; never commit it.
 
 - [ ] **Step 5: Commit browser integration**
 
 ```powershell
-git add app/browser_session.py app/sites/douban_movie.py tests/test_douban_parser.py
-git commit -m "feat: add Playwright browser actions"
+git add app/browser_session.py app/sites/douban_movie.py tests/test_browser_session.py tests/test_douban_parser.py
+git commit -m "feat: add DrissionPage browser actions"
 ```
 
 ### Task 7: Implement serial orchestration, retry policy, and resume
@@ -1076,7 +1116,7 @@ from dataclasses import replace
 
 from app.matcher import choose_match
 from app.models import MatchMethod, MovieResult, RunSummary, Status, Task
-from app.sites.douban_movie import BlockedError, PageChangedError
+from app.sites.douban_movie import BlockedError, NetworkError, PageChangedError
 
 
 DEFAULT_RETRY = {Status.NETWORK_ERROR, Status.OUTPUT_LOCKED, Status.UNEXPECTED_ERROR}
@@ -1209,14 +1249,16 @@ def configure_logging(artifacts_dir: Path) -> logging.Logger:
     return logger
 
 
-def capture_failure(page, artifacts_dir: Path, task_id: str) -> None:
+def capture_failure(tab, artifacts_dir: Path, task_id: str) -> None:
     artifacts_dir.mkdir(parents=True, exist_ok=True)
-    page.screenshot(path=artifacts_dir / f"{task_id}.png", full_page=True)
+    tab.get_screenshot(path=artifacts_dir, name=f"{task_id}.png", full_page=True)
+    sanitized_html = redact(tab.html)[:200_000]
+    (artifacts_dir / f"{task_id}.html").write_text(sanitized_html, encoding="utf-8")
 ```
 
 - [ ] **Step 4: Replace Runner with an explicit fail-closed retry and diagnostics implementation**
 
-Keep `DEFAULT_RETRY` and replace the `Runner` class in `app/runner.py` with the following. Import `logging`, `Path`, `Callable`, `TypeVar`, `PlaywrightTimeoutError`, `capture_failure`, and `OutputLockedError`; `OutputLockedError` is deliberately re-raised for CLI exit code 4.
+Keep `DEFAULT_RETRY` and replace the `Runner` class in `app/runner.py` with the following. Import `logging`, `Path`, `Callable`, `TypeVar`, the adapter's `NetworkError`, `capture_failure`, and `OutputLockedError`; `OutputLockedError` is deliberately re-raised for CLI exit code 4.
 
 ```python
 T = TypeVar("T")
@@ -1242,13 +1284,13 @@ class Runner:
         self.artifacts_dir = artifacts_dir
 
     def _network_operation(self, operation: Callable[[], T]) -> T:
-        last_error: PlaywrightTimeoutError | None = None
+        last_error: NetworkError | None = None
         for wait_seconds in (0, 2, 5):
             if wait_seconds:
                 time.sleep(wait_seconds)
             try:
                 return operation()
-            except PlaywrightTimeoutError as exc:
+            except NetworkError as exc:
                 last_error = exc
         assert last_error is not None
         raise last_error
@@ -1257,7 +1299,7 @@ class Runner:
         self.store.upsert(result)
         self.logger.info("task_id=%s status=%s", result.task_id, result.status.value)
         if result.status in {Status.NETWORK_ERROR, Status.PAGE_CHANGED, Status.BLOCKED, Status.UNEXPECTED_ERROR}:
-            if self.artifacts_dir is not None and hasattr(self.page, "screenshot"):
+            if self.artifacts_dir is not None and hasattr(self.page, "get_screenshot"):
                 capture_failure(self.page, self.artifacts_dir, result.task_id)
 
     def run(self, tasks: list[Task]) -> RunSummary:
@@ -1296,7 +1338,7 @@ class Runner:
                 result = replace(MovieResult.from_task(task), status=Status.PAGE_CHANGED, error_message=str(exc)).stamped()
                 self._persist(result)
                 processed += 1
-            except PlaywrightTimeoutError as exc:
+            except NetworkError as exc:
                 result = replace(MovieResult.from_task(task), status=Status.NETWORK_ERROR, error_message=str(exc)[:200]).stamped()
                 self._persist(result)
                 processed += 1
@@ -1385,6 +1427,8 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--headed", action=argparse.BooleanOptionalAction, default=True)
     run.add_argument("--retry-status", action="append", default=[])
     run.add_argument("--min-interval", type=float, default=5.0)
+    run.add_argument("--browser-path")
+    run.add_argument("--profile-dir", default="browser-profile/douban")
     return parser
 
 
@@ -1396,8 +1440,9 @@ def execute(argv: list[str] | None = None) -> int:
         tasks = load_tasks(Path(args.input))
         retry = {Status(value) for value in args.retry_status}
         store = ExcelStore(Path(args.output))
-        with BrowserSession(args.headed, artifacts) as page:
-            summary = Runner(DoubanMovieAdapter(), store, page, args.min_interval, retry, logger, artifacts).run(tasks)
+        browser_path = Path(args.browser_path) if args.browser_path else None
+        with BrowserSession(args.headed, artifacts, Path(args.profile_dir), browser_path) as tab:
+            summary = Runner(DoubanMovieAdapter(), store, tab, args.min_interval, retry, logger, artifacts).run(tasks)
         return 3 if summary.blocked else 0
     except (InputError, ValueError) as exc:
         logger.error(str(exc))
@@ -1435,7 +1480,7 @@ git add app/main.py tests/test_main.py
 git commit -m "feat: wire browser bot CLI"
 ```
 
-### Task 10: Verify current live locators with Playwright Inspector
+### Task 10: Verify current live locators with DrissionPage headed audit
 
 **Files:**
 - Modify: `app/sites/douban_movie.py`
@@ -1455,22 +1500,20 @@ Create `artifacts/locator-audit.md` locally with this filled record:
 - Allowed target: movie.douban.com
 - Allowed queries: 1
 - Minimum interval: 5 seconds
-- Browser: bundled Chromium
+- Browser: installed Chrome/Edge via DrissionPage
 ```
 
 Expected: every field has a real value; if approval reference cannot be filled, stop this task.
 
-- [ ] **Step 2: Open Inspector in headed mode**
+- [ ] **Step 2: Run exactly one approved query in headed mode**
 
 Run:
 
 ```powershell
-$env:PWDEBUG="1"
-python -m app.main run --input .\inputs\queries.example.csv --output .\outputs\locator-audit.xlsx --headed --min-interval 5
-Remove-Item Env:PWDEBUG
+python -m app.main run --input .\artifacts\locator-audit-input.csv --output .\outputs\locator-audit.xlsx --headed --min-interval 5
 ```
 
-Expected: Inspector opens. Execute only the first approved query, then stop the run.
+Before running, create the untracked runtime file `artifacts/locator-audit-input.csv` with exactly `query,year` and the one approved query row. Expected: installed Chrome/Edge opens through DrissionPage, executes exactly the approved query, and then closes. If a block or challenge appears, stop immediately; do not retry or bypass it.
 
 - [ ] **Step 3: Update only verified locator candidates**
 
@@ -1478,12 +1521,12 @@ For the search input, prefer this order:
 
 ```python
 SEARCH_INPUTS = (
-    ("role", "searchbox"),
-    ("css", "input[name='search_text']"),
+    "@role=searchbox",
+    "css:input[name='search_text']",
 )
 ```
 
-For candidates, use the smallest stable container and canonical `/subject/<id>/` links observed in Inspector. For details, retain semantic property attributes only if present. Do not add long `nth-child` selectors or XPath tied to layout.
+Use DrissionPage's `ele()`/`eles()` and `tree()` output only for the approved page. For candidates, use the smallest stable container and canonical `/subject/<id>/` links observed in the headed audit. For details, retain semantic property attributes only if present. Do not add long `nth-child` selectors or XPath tied to layout.
 
 - [ ] **Step 4: Refresh sanitized fixtures and rerun offline tests**
 
@@ -1520,6 +1563,8 @@ Include:
 ## Prerequisites
 - Windows 10/11
 - Python 3.11 or 3.12
+- Installed Google Chrome or Microsoft Edge (Chromium 100+)
+- Non-commercial DrissionPage use or permission from its copyright holder
 - Permission to automate the selected target and collect the listed public fields
 
 ## Install
@@ -1527,7 +1572,6 @@ Include:
 py -3.12 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev]"
-python -m playwright install chromium
 ```
 ````
 
@@ -1549,7 +1593,7 @@ Include explicit statements:
 ```markdown
 - Stop when the program reports BLOCKED; do not add bypass tooling.
 - Close the output workbook in Excel before retrying OUTPUT_LOCKED.
-- Never commit `.env`, `playwright/.auth/`, outputs, screenshots, traces, API keys, cookies, or request headers.
+- Never commit `.env`, `browser-profile/`, outputs, screenshots, HTML snapshots, API keys, cookies, or request headers.
 - Delete artifacts older than seven days after confirming they are no longer needed.
 ```
 
@@ -1588,7 +1632,7 @@ Expected: 0 failures; pure logic and parser modules each report at least 80% sta
 
 ```powershell
 python -m pip check
-python -c "from playwright.sync_api import sync_playwright; p=sync_playwright().start(); b=p.chromium.launch(headless=True); print(b.version); b.close(); p.stop()"
+python -c "from pathlib import Path; from app.browser_session import BrowserSession; s=BrowserSession(True, Path('artifacts'), Path('browser-profile/smoke')); t=s.__enter__(); print(t.url); s.__exit__(None,None,None)"
 ```
 
 Expected: `No broken requirements found`, Chromium version printed, exit 0.
@@ -1618,7 +1662,7 @@ Expected: `data_rows` equals the number of processed approved inputs and equals 
 git status --short
 $matches = git grep -n -I -E "(sk-[A-Za-z0-9_-]{20,}|MINIMAX_API_KEY=.+|Cookie:)" -- . ':!*.example'
 if ($LASTEXITCODE -eq 0) { $matches; throw "Possible secret found" }
-git ls-files outputs artifacts playwright/.auth
+git ls-files outputs artifacts browser-profile
 ```
 
 Expected: no secret matches; only `.gitkeep` files appear under ignored runtime directories.
