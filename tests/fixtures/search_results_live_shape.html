@@ -1,0 +1,69 @@
+<!--
+  Desensitized live shape fixture based on artifacts/7a5714a3a456d4a56af4.html.
+  Source: real douban search result DOM (霸王别姬 query, captured 2026-07-15).
+
+  Preserved to lock the parser contract:
+    * Stable class names: item-root / cover-link / title-text / detail / title / meta
+    * Same canonical subject URL repeated on cover-link and title-text anchors
+    * Title text contains U+200E LEFT-TO-RIGHT MARK immediately before " (YYYY)"
+    * Title text variant without the invisible mark for the third card
+    * Optional [可播放] label span after the title-text anchor
+    * "meta abstract" is region + genre + runtime, NOT "year / kind" — parser must
+      NOT treat it as the legacy "year / kind" field
+    * "meta abstract_2" is cast list, also must NOT be confused for kind
+
+  Removed for desensitization:
+    * data-moreurl / onclick tracking payload
+    * Image URLs and alt text (kept only the year-bearing alt for reference)
+    * Cookie / sessions / browser profile state
+    * window.__DATA__ hydration JSON block
+    * All ad / third-party scripts
+    * Full site header / footer / nav / search suggest / footer scripts
+
+  This fixture must drive the new parse_search_html() contract:
+    * Dedup by canonical subject URL
+    * Prefer title-text anchor over cover-link anchor
+    * Strip trailing invisible chars (U+200E / U+200F / U+FEFF) from title
+    * Extract year from trailing " (YYYY)" or "（YYYY）" in title text
+    * Limit candidates to 5
+    * Kind defaults to "电影" because real DOM has no "year / kind" field
+-->
+<div id="root" class="root">
+  <div class="item-root">
+    <a href="https://movie.douban.com/subject/1291546/" class="cover-link">
+      <img alt="霸王别姬 (1993)" class="cover">
+    </a>
+    <div class="detail">
+      <div class="title">
+        <a href="https://movie.douban.com/subject/1291546/" class="title-text">霸王别姬‎ (1993)</a>
+      </div>
+      <div class="meta abstract">中国大陆 / 中国香港 / 剧情 / 爱情 / 同性 / 171分钟</div>
+      <div class="meta abstract_2">陈凯歌 / 张国荣 / 张丰毅 / 巩俐</div>
+    </div>
+  </div>
+  <div class="item-root">
+    <a href="https://movie.douban.com/subject/20645019/" class="cover-link">
+      <img alt="霸王别姬(京剧) (2014)" class="cover">
+    </a>
+    <div class="detail">
+      <div class="title">
+        <a href="https://movie.douban.com/subject/20645019/" class="title-text">霸王别姬(京剧)‎ (2014)</a>
+        <span class="label">[可播放]</span>
+      </div>
+      <div class="meta abstract">中国大陆 / 戏曲 / 97分钟</div>
+      <div class="meta abstract_2">滕俊杰 / 尚长荣 / 史依弘</div>
+    </div>
+  </div>
+  <div class="item-root">
+    <a href="https://movie.douban.com/subject/9999999999/" class="cover-link">
+      <img alt="测试电影 (2025)" class="cover">
+    </a>
+    <div class="detail">
+      <div class="title">
+        <a href="https://movie.douban.com/subject/9999999999/" class="title-text">测试电影 (2025)</a>
+      </div>
+      <div class="meta abstract">中国大陆 / 剧情</div>
+      <div class="meta abstract_2">某导演 / 某演员</div>
+    </div>
+  </div>
+</div>

@@ -47,6 +47,25 @@ def test_parse_search_limits_candidates_to_five() -> None:
     assert len(DoubanMovieAdapter.parse_search_html("".join(item.format(i) for i in range(1, 7)))) == 5
 
 
+def test_parse_search_live_shape_extracts_three_unique_cards() -> None:
+    candidates = DoubanMovieAdapter.parse_search_html(html("search_results_live_shape.html"))
+    assert [(c.title, c.year, c.kind, c.detail_url) for c in candidates] == [
+        ("霸王别姬", "1993", "电影", "https://movie.douban.com/subject/1291546/"),
+        ("霸王别姬(京剧)", "2014", "电影", "https://movie.douban.com/subject/20645019/"),
+        ("测试电影", "2025", "电影", "https://movie.douban.com/subject/9999999999/"),
+    ]
+
+
+def test_parse_search_live_shape_strips_left_to_right_mark() -> None:
+    candidates = DoubanMovieAdapter.parse_search_html(html("search_results_live_shape.html"))
+    assert len(candidates) == 3, "expected three cards before checking invisible char strip"
+    for candidate in candidates:
+        # U+200E / U+200F / U+FEFF invisible marks must be stripped from titles.
+        assert "\u200e" not in candidate.title
+        assert "\u200f" not in candidate.title
+        assert "\ufeff" not in candidate.title
+
+
 def test_parse_detail_extracts_fields_and_multiple_directors() -> None:
     task = Task("a", "肖申克的救赎", "1994")
     result = DoubanMovieAdapter.parse_detail_html(html("detail_movie.html"), task, DETAIL_URL)
