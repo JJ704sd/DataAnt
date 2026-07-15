@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from app.models import MatchMethod, Status, Task
-from app.sites.douban_movie import DoubanMovieAdapter
+from app.models import Candidate, MatchMethod, Status, Task
+from app.sites.douban_movie import DoubanMovieAdapter, NetworkError
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -76,3 +76,31 @@ def test_blocked_status_is_detected(status_code: int) -> None:
 def test_blocked_text_is_detected() -> None:
     assert DoubanMovieAdapter.is_blocked(html("blocked.html"), 200)
     assert not DoubanMovieAdapter.is_blocked("<html>普通页面</html>", 200)
+
+
+def test_adapter_exposes_a_small_locator_contract() -> None:
+    assert DoubanMovieAdapter.SEARCH_INPUTS == (
+        "@role=searchbox",
+        "css:input[name='search_text']",
+    )
+
+
+class NavigationFailureTab:
+    html = ""
+    url = "data:text/html,offline"
+
+    def get(self, url: str, retry: int, timeout: int) -> bool:
+        return False
+
+
+def test_search_navigation_failure_is_a_network_error() -> None:
+    with pytest.raises(NetworkError, match="navigation failed"):
+        DoubanMovieAdapter().search(NavigationFailureTab(), Task("a", "电影", None))
+
+
+def test_detail_navigation_failure_is_a_network_error() -> None:
+    candidate = Candidate("电影", "1994", "电影", "https://movie.douban.com/subject/1/")
+    with pytest.raises(NetworkError, match="detail navigation failed"):
+        DoubanMovieAdapter().fetch_detail(
+            NavigationFailureTab(), Task("a", "电影", None), candidate
+        )
