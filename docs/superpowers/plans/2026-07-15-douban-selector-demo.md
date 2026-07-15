@@ -229,11 +229,13 @@ git -C 'D:\DataAnt\.worktrees\browser-bot-demo' commit -m 'fix: detect rendered 
 
 Expected: zero failures.
 
-- [ ] **Step 2: Run the portable core verification**
+- [ ] **Step 2: Generate coverage JSON and run the portable core verification**
 
 ```powershell
 Set-Location 'D:\DataAnt\.worktrees\browser-bot-demo'
-& '.\.venv\Scripts\python.exe' -m scripts.verify_core
+& '.\.venv\Scripts\python.exe' -m pytest --cov=app --cov-report=term-missing --cov-report=json:artifacts/coverage.json -v
+if ($LASTEXITCODE -ne 0) { throw 'coverage run failed' }
+& '.\.venv\Scripts\python.exe' -m scripts.verify_core --coverage-json artifacts/coverage.json
 ```
 
 Expected: exit code 0 and each core module at or above the configured 80% threshold.
@@ -284,4 +286,3 @@ Expected: exit code 0 unless the site returns a documented blocked/network/page-
 Use the existing workbook verification path in `docs/superpowers/tasks/core-13-release-readiness.md` without modifying that document. Check headers, approved row count, statuses, canonical detail URLs, and representative title/year/director/rating values.
 
 Expected: `WORKBOOK_EVIDENCE_OK`, followed by the documented release readiness result. Runtime evidence remains ignored and uncommitted.
-
