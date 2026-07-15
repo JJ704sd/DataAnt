@@ -58,9 +58,10 @@ if ($LASTEXITCODE -ne 0) { throw 'coverage run failed' }
 import json
 from pathlib import Path
 report = json.loads(Path('artifacts/coverage.json').read_text(encoding='utf-8'))
+files = {name.replace('\\', '/'): data for name, data in report['files'].items()}
 required = ('app/input_loader.py', 'app/matcher.py', 'app/sites/douban_movie.py')
 for name in required:
-    percent = report['files'][name]['summary']['percent_covered']
+    percent = files[name]['summary']['percent_covered']
     assert percent >= 80, (name, percent)
     print(f'{name}: {percent:.2f}%')
 '@ | & 'D:\DataAnt\.worktrees\browser-bot-demo\.venv\Scripts\python.exe' -

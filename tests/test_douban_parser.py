@@ -3,7 +3,13 @@ from pathlib import Path
 import pytest
 
 from app.models import Candidate, MatchMethod, Status, Task
-from app.sites.douban_movie import DoubanMovieAdapter, NetworkError
+from app.sites import douban_movie
+from app.sites.douban_movie import (
+    BlockedError,
+    DoubanMovieAdapter,
+    NetworkError,
+    PageChangedError,
+)
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -93,6 +99,28 @@ class NavigationFailureTab:
         return False
 
 
+class SearchInput:
+    def input(self, value: str, clear: bool) -> None:
+        return None
+
+
+class LoadedTab:
+    def __init__(self, body: str, url: str = DETAIL_URL, result_marker: bool = True):
+        self.html = body
+        self.url = url
+        self.result_marker = result_marker
+
+    def get(self, url: str, retry: int, timeout: int) -> bool:
+        return True
+
+    def ele(self, locator: str, timeout: int):
+        if locator in DoubanMovieAdapter.SEARCH_INPUTS:
+            return SearchInput()
+        if locator == "css:.result-list" and self.result_marker:
+            return object()
+        return None
+
+
 def test_search_navigation_failure_is_a_network_error() -> None:
     with pytest.raises(NetworkError, match="navigation failed"):
         DoubanMovieAdapter().search(NavigationFailureTab(), Task("a", "电影", None))
@@ -104,3 +132,45 @@ def test_detail_navigation_failure_is_a_network_error() -> None:
         DoubanMovieAdapter().fetch_detail(
             NavigationFailureTab(), Task("a", "电影", None), candidate
         )
+
+
+def test_search_returns_candidates_after_result_marker() -> None:
+    tab = LoadedTab(html("search_results.html"))
+    candidates = DoubanMovieAdapter().search(tab, Task("a", "肖申克的救赎", "1994"))
+    assert [candidate.title for candidate in candidates] == ["肖申克的救赎", "肖申克"]
+
+
+def test_search_timeout_is_a_page_changed_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    def raise_timeout(predicate, timeout: int) -> None:
+        raise TimeoutError
+
+    monkeypatch.setattr(douban_movie, "wait_until", raise_timeout)
+    with pytest.raises(PageChangedError, match="result marker"):
+        DoubanMovieAdapter().search(
+            LoadedTab("<html>普通页面</html>", result_marker=False),
+            Task("a", "电影", None),
+        )
+
+
+def test_search_blocked_page_stops_the_batch() -> None:
+    with pytest.raises(BlockedError, match="blocked the batch"):
+        DoubanMovieAdapter().search(LoadedTab(html("blocked.html")), Task("a", "电影", None))
+
+
+def test_detail_blocked_page_stops_the_batch() -> None:
+    candidate = Candidate("电影", "1994", "电影", DETAIL_URL)
+    with pytest.raises(BlockedError, match="blocked the batch"):
+        DoubanMovieAdapter().fetch_detail(
+            LoadedTab(html("blocked.html")), Task("a", "电影", None), candidate
+        )
+
+
+def test_fetch_detail_parses_loaded_page() -> None:
+    candidate = Candidate("肖申克的救赎", "1994", "电影", DETAIL_URL)
+    result = DoubanMovieAdapter().fetch_detail(
+        LoadedTab(html("detail_movie.html")),
+        Task("a", "肖申克的救赎", "1994"),
+        candidate,
+    )
+    assert result.status == Status.SUCCESS
+    assert result.matched_title == "肖申克的救赎"
