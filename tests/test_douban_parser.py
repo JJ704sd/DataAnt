@@ -28,6 +28,16 @@ def test_parse_search_candidates_in_source_order() -> None:
     ]
 
 
+def test_parse_react_search_candidates_with_nested_markup() -> None:
+    candidates = DoubanMovieAdapter.parse_search_html(
+        html("search_results_react.html")
+    )
+    assert [(c.title, c.year, c.kind, c.detail_url) for c in candidates] == [
+        ("肖申克的救赎", "1994", "电影", DETAIL_URL),
+        ("肖申克", "2010", "短片", "https://movie.douban.com/subject/9999999/"),
+    ]
+
+
 def test_parse_search_empty_returns_empty_list() -> None:
     assert DoubanMovieAdapter.parse_search_html(html("search_empty.html")) == []
 
