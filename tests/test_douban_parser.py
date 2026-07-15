@@ -9,6 +9,7 @@ from app.sites.douban_movie import (
     DoubanMovieAdapter,
     NetworkError,
     PageChangedError,
+    SiteProtectionChallenge,
 )
 from DrissionPage.errors import ContextLostError, PageDisconnectedError
 
@@ -395,3 +396,74 @@ def test_fetch_detail_escalates_persistent_transient_cdp_error_to_network_error(
     tab = AlwaysLostDetailTab(failure_factory)
     with pytest.raises(NetworkError, match=r"^context lost: "):
         DoubanMovieAdapter().fetch_detail(tab, Task("a", "肖申克的救赎", "1994"), candidate)
+
+
+# --------------------------------------------------------------------------- #
+# Site protection proof-of-work challenge: distinct from BLOCKED
+# --------------------------------------------------------------------------- #
+
+
+def test_is_challenge_pending_recognises_the_pow_challenge_form() -> None:
+    assert DoubanMovieAdapter.is_challenge_pending(html("challenge.html")) is True
+
+
+def test_is_challenge_pending_is_false_for_real_movie_pages() -> None:
+    assert DoubanMovieAdapter.is_challenge_pending(html("search_results.html")) is False
+    assert DoubanMovieAdapter.is_challenge_pending(html("detail_movie.html")) is False
+    assert DoubanMovieAdapter.is_challenge_pending(html("blocked.html")) is False
+    assert DoubanMovieAdapter.is_challenge_pending("") is False
+
+
+def test_challenge_html_is_blocked_too_but_collected_as_challenge() -> None:
+    # Douban's challenge page also matches the "sec.douban.com" / "captcha"
+    # heuristics in some past runs; the runner must surface it as the more
+    # specific SITE_PROTECTION_CHALLENGE status, not BLOCKED. We assert the
+    # ordering by exercising the adapter helper that the runner relies on.
+    assert DoubanMovieAdapter.is_challenge_pending(html("challenge.html")) is True
+
+
+class ChallengePageTab:
+    """A tab whose every navigation returns the real-shape PoW challenge page."""
+
+    def __init__(self) -> None:
+        self.html = html("challenge.html")
+        self.url = "https://sec.douban.com/c?r=https%3A%2F%2Fmovie.douban.com%2F"
+        self._get_attempts = 0
+
+    def get(self, url: str, retry: int, timeout: int) -> bool:
+        self._get_attempts += 1
+        return True
+
+    def ele(self, locator: str, timeout: int):
+        if locator in DoubanMovieAdapter.SEARCH_INPUTS:
+            return SearchInput()
+        if locator == "css:.result-list":
+            return object()
+        return None
+
+
+def test_search_challenge_page_raises_site_protection_challenge() -> None:
+    tab = ChallengePageTab()
+    with pytest.raises(SiteProtectionChallenge, match="proof-of-work challenge"):
+        DoubanMovieAdapter().search(tab, Task("a", "肖申克的救赎", "1994"))
+    # Adapter must NOT silently retry when a challenge is detected.
+    assert tab._get_attempts == 1
+
+
+def test_fetch_detail_challenge_page_raises_site_protection_challenge() -> None:
+    candidate = Candidate("肖申克的救赎", "1994", "电影", DETAIL_URL)
+    tab = ChallengePageTab()
+    with pytest.raises(SiteProtectionChallenge, match="proof-of-work challenge"):
+        DoubanMovieAdapter().fetch_detail(
+            tab, Task("a", "肖申克的救赎", "1994"), candidate
+        )
+    assert tab._get_attempts == 1
+
+
+def test_search_challenge_does_not_collapse_into_blocked_error() -> None:
+    tab = ChallengePageTab()
+    # If we ever regressed and let the challenge slip into the BLOCKED bucket,
+    # this test would raise BlockedError instead of the more specific
+    # SiteProtectionChallenge and fail the match.
+    with pytest.raises(SiteProtectionChallenge):
+        DoubanMovieAdapter().search(tab, Task("a", "肖申克的救赎", "1994"))

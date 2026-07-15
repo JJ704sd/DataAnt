@@ -111,6 +111,25 @@ def test_verify_controlled_workbook_rejects_invalid_status(tmp_path: Path) -> No
         verify_controlled_workbook(workbook)
 
 
+@pytest.mark.parametrize(
+    "status",
+    [
+        "SITE_PROTECTION_CHALLENGE",
+        "BLOCKED",
+        "NETWORK_ERROR",
+        "REVIEW_REQUIRED",
+        "SUCCESS",
+    ],
+)
+def test_verify_controlled_workbook_accepts_site_protection_challenge(
+    tmp_path: Path, status: str
+) -> None:
+    workbook = tmp_path / "douban_movies.xlsx"
+    write_workbook(workbook, row_count=1, status=status)
+    summary = verify_controlled_workbook(workbook)
+    assert summary == {"data_rows": 1, "unique_ids": 1}
+
+
 def test_verify_controlled_workbook_rejects_missing_collected_at(tmp_path: Path) -> None:
     workbook = tmp_path / "douban_movies.xlsx"
     write_workbook(workbook, collected_at=None)

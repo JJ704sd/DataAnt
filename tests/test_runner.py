@@ -16,7 +16,12 @@ from app.models import (
     Task,
 )
 from app.runner import DEFAULT_RETRY, Runner
-from app.sites.douban_movie import BlockedError, NetworkError, PageChangedError
+from app.sites.douban_movie import (
+    BlockedError,
+    NetworkError,
+    PageChangedError,
+    SiteProtectionChallenge,
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -676,6 +681,60 @@ def test_blocked_status_triggers_capture(tmp_path: Path) -> None:
     assert len(tab.screenshot_calls) == 1
     assert (tmp_path / "a.html").exists()
     assert store.upserts[0].status is Status.BLOCKED
+
+
+def test_site_protection_challenge_stops_the_batch_after_writing_current_task() -> None:
+    store = FakeStore()
+    adapter = FakeAdapter(
+        search_results={
+            "a": SiteProtectionChallenge("proof-of-work challenge pending"),
+            "b": [],
+        }
+    )
+    runner = make_runner(adapter, store)
+
+    summary = runner.run([task("a"), task("b")])
+
+    assert summary == RunSummary(processed=1, skipped=0, blocked=True)
+    assert [result.task_id for result in store.upserts] == ["a"]
+    # The challenge must be surfaced as its own status, never collapsed
+    # into BLOCKED or UNEXPECTED_ERROR.
+    assert store.upserts[0].status is Status.SITE_PROTECTION_CHALLENGE
+    assert "proof-of-work challenge" in (store.upserts[0].error_message or "")
+    # Adapter.search must not have been called for "b".
+    assert [called[1].task_id for called in adapter.search_calls] == ["a"]
+
+
+def test_site_protection_challenge_status_triggers_capture(tmp_path: Path) -> None:
+    tab = FakeTab(html="challenge pending")
+    store = FakeStore()
+    adapter = FakeAdapter(
+        search_results={"a": SiteProtectionChallenge("proof-of-work challenge pending")}
+    )
+    runner = make_runner(adapter, store, tab=tab, artifacts_dir=tmp_path)
+
+    runner.run([task("a")])
+
+    assert len(tab.screenshot_calls) == 1
+    assert (tmp_path / "a.html").exists()
+    assert store.upserts[0].status is Status.SITE_PROTECTION_CHALLENGE
+
+
+def test_site_protection_challenge_during_fetch_detail_stops_batch() -> None:
+    store = FakeStore()
+    adapter = FakeAdapter(search_results={"a": [candidate("英雄", "2002")]})
+    adapter.detail_results = {
+        "a": SiteProtectionChallenge("proof-of-work challenge pending"),
+    }
+    runner = make_runner(adapter, store)
+
+    summary = runner.run([task("a"), task("b")])
+
+    assert summary == RunSummary(processed=1, skipped=0, blocked=True)
+    assert [r.task_id for r in store.upserts] == ["a"]
+    # Status must be the challenge-specific one even when the challenge is
+    # raised on the detail navigation, not just on the search navigation.
+    assert store.upserts[0].status is Status.SITE_PROTECTION_CHALLENGE
 
 
 def test_unexpected_error_status_triggers_capture(tmp_path: Path) -> None:

@@ -173,12 +173,40 @@ class NetworkError(RuntimeError):
     pass
 
 
+class SiteProtectionChallenge(RuntimeError):
+    """Raised when Douban's JavaScript proof-of-work challenge is detected.
+
+    Douban serves a SHA-512 nonce-mining challenge (typically under
+    ``sec.douban.com``) when site protection decides the current request
+    pattern is suspect. The browser can solve it automatically in 1-3
+    seconds, but per the project's live-run rules we never automate that
+    bypass: we stop the batch and surface the status so the operator can
+    decide whether to wait for the IP frequency window to expire and
+    retry. This is distinct from ``BlockedError`` because a challenge is
+    transient and a blocked page is not.
+    """
+
+
 class DoubanMovieAdapter:
     SEARCH_INPUTS = (
         "@role=searchbox",
         "css:input[name='search_text']",
     )
     EMPTY_RESULT_TEXT = ("没有找到", "暂无搜索结果")
+    # The Douban JS proof-of-work challenge form posts to ``/c`` and uses
+    # three hidden inputs named ``cha`` (challenge string), ``sol`` (solved
+    # nonce placeholder) and ``red`` (post-challenge redirect target). We
+    # only need the first two to recognise the page: any real movie page
+    # that ships these inputs is serving the challenge, not content.
+    _CHALLENGE_MARKERS: tuple[str, ...] = (
+        'name="sec"',
+        'name="cha"',
+        'name="sol"',
+    )
+
+    @staticmethod
+    def is_challenge_pending(html: str) -> bool:
+        return all(marker in html for marker in DoubanMovieAdapter._CHALLENGE_MARKERS)
 
     @staticmethod
     def is_blocked(html: str, status_code: int | None, url: str = "") -> bool:
@@ -257,6 +285,7 @@ class DoubanMovieAdapter:
     def _search_once(self, tab, task: Task) -> list[Candidate]:
         if not tab.get("https://movie.douban.com/", retry=0, timeout=20):
             raise NetworkError("Douban navigation failed")
+        self._check_site_protection(tab.html, tab.url)
         if self.is_blocked(tab.html, None, tab.url):
             raise BlockedError("Douban blocked the batch")
         self._search_input(tab).input(f"{task.query}\n", clear=True)
@@ -265,6 +294,7 @@ class DoubanMovieAdapter:
         except TimeoutError as exc:
             raise PageChangedError("Search result marker was not found") from exc
         page_html = tab.html
+        self._check_site_protection(page_html, tab.url)
         if self.is_blocked(page_html, None, tab.url):
             raise BlockedError("Douban blocked the batch")
         return self.parse_search_html(page_html)
@@ -284,6 +314,15 @@ class DoubanMovieAdapter:
         if not tab.get(candidate.detail_url, retry=0, timeout=20):
             raise NetworkError("Douban detail navigation failed")
         page_html = tab.html
+        self._check_site_protection(page_html, tab.url)
         if self.is_blocked(page_html, None, tab.url):
             raise BlockedError("Douban blocked the batch")
         return self.parse_detail_html(page_html, task, tab.url)
+
+    @classmethod
+    def _check_site_protection(cls, html: str, url: str) -> None:
+        if cls.is_challenge_pending(html):
+            raise SiteProtectionChallenge(
+                f"Douban served a JS proof-of-work challenge (url={url}); "
+                "stop the batch and wait for the IP frequency window to expire."
+            )

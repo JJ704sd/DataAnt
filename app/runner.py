@@ -9,7 +9,12 @@ from typing import Any
 from app.diagnostics import capture_failure, redact
 from app.matcher import choose_match
 from app.models import MovieResult, RunSummary, Status, Task
-from app.sites.douban_movie import BlockedError, NetworkError, PageChangedError
+from app.sites.douban_movie import (
+    BlockedError,
+    NetworkError,
+    PageChangedError,
+    SiteProtectionChallenge,
+)
 
 DEFAULT_RETRY: frozenset[Status] = frozenset(
     {Status.NETWORK_ERROR, Status.OUTPUT_LOCKED, Status.UNEXPECTED_ERROR}
@@ -27,6 +32,7 @@ _CAPTURE_STATUSES: frozenset[Status] = frozenset(
         Status.NETWORK_ERROR,
         Status.PAGE_CHANGED,
         Status.BLOCKED,
+        Status.SITE_PROTECTION_CHALLENGE,
         Status.UNEXPECTED_ERROR,
     }
 )
@@ -91,6 +97,18 @@ class Runner:
                 _result_with(task, status=Status.BLOCKED, error_message=str(exc)),
                 True,
             )
+        except SiteProtectionChallenge as exc:
+            # Surfaced as its own status so the operator can tell a transient
+            # proof-of-work challenge from a hard block. Behaviour matches
+            # BLOCKED: stop the batch on the first occurrence.
+            return (
+                _result_with(
+                    task,
+                    status=Status.SITE_PROTECTION_CHALLENGE,
+                    error_message=str(exc),
+                ),
+                True,
+            )
         except PageChangedError as exc:
             return (
                 _result_with(task, status=Status.PAGE_CHANGED, error_message=str(exc)),
@@ -142,6 +160,15 @@ class Runner:
         except BlockedError as exc:
             return (
                 _result_with(task, status=Status.BLOCKED, error_message=str(exc)),
+                True,
+            )
+        except SiteProtectionChallenge as exc:
+            return (
+                _result_with(
+                    task,
+                    status=Status.SITE_PROTECTION_CHALLENGE,
+                    error_message=str(exc),
+                ),
                 True,
             )
         except PageChangedError as exc:
