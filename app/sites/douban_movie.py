@@ -7,8 +7,20 @@ from html.parser import HTMLParser
 from urllib.parse import urlparse
 
 from DrissionPage.common import wait_until
+from DrissionPage.errors import ContextLostError, PageDisconnectedError
 
 from app.models import Candidate, MatchMethod, MovieResult, Status, Task
+
+# Transient DrissionPage errors raised when the browser's CDP target for the
+# current tab is gone or the underlying connection dropped. They are mapped
+# to ``NetworkError`` so the runner's bounded 2/5s backoff retry can absorb
+# them instead of the business ``UNEXPECTED_ERROR`` bucket, but we still
+# re-attach the tab once ourselves first: most of these resolve themselves
+# on the next ``tab.get`` call without waiting for a backoff sleep.
+_TRANSIENT_CONTEXT_ERRORS: tuple[type[BaseException], ...] = (
+    ContextLostError,
+    PageDisconnectedError,
+)
 
 
 DETAIL_URL = re.compile(r"^https://movie\.douban\.com/subject/\d+/$")
@@ -227,6 +239,22 @@ class DoubanMovieAdapter:
         )
 
     def search(self, tab, task: Task) -> list[Candidate]:
+        try:
+            return self._search_once(tab, task)
+        except _TRANSIENT_CONTEXT_ERRORS:
+            # The CDP target went away between tasks; re-attach the same tab
+            # by retrying the whole search step once. If the second attempt
+            # also fails with a transient error, escalate to NetworkError so
+            # the runner's 2/5s backoff can take over without the business
+            # ``UNEXPECTED_ERROR`` bucket recording a phantom exception.
+            try:
+                return self._search_once(tab, task)
+            except _TRANSIENT_CONTEXT_ERRORS as exc2:
+                raise NetworkError(
+                    f"context lost: {type(exc2).__name__}"
+                ) from exc2
+
+    def _search_once(self, tab, task: Task) -> list[Candidate]:
         if not tab.get("https://movie.douban.com/", retry=0, timeout=20):
             raise NetworkError("Douban navigation failed")
         if self.is_blocked(tab.html, None, tab.url):
@@ -242,6 +270,17 @@ class DoubanMovieAdapter:
         return self.parse_search_html(page_html)
 
     def fetch_detail(self, tab, task: Task, candidate: Candidate) -> MovieResult:
+        try:
+            return self._fetch_detail_once(tab, task, candidate)
+        except _TRANSIENT_CONTEXT_ERRORS:
+            try:
+                return self._fetch_detail_once(tab, task, candidate)
+            except _TRANSIENT_CONTEXT_ERRORS as exc2:
+                raise NetworkError(
+                    f"context lost: {type(exc2).__name__}"
+                ) from exc2
+
+    def _fetch_detail_once(self, tab, task: Task, candidate: Candidate) -> MovieResult:
         if not tab.get(candidate.detail_url, retry=0, timeout=20):
             raise NetworkError("Douban detail navigation failed")
         page_html = tab.html

@@ -10,6 +10,7 @@ from app.sites.douban_movie import (
     NetworkError,
     PageChangedError,
 )
+from DrissionPage.errors import ContextLostError, PageDisconnectedError
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -237,3 +238,160 @@ def test_fetch_detail_raises_blocked_on_security_redirect() -> None:
     tab = LoadedTab("<html>正常页面</html>", url="https://sec.douban.com/c?r=foo")
     with pytest.raises(BlockedError, match="blocked the batch"):
         DoubanMovieAdapter().fetch_detail(tab, Task("a", "电影", None), candidate)
+
+
+# --------------------------------------------------------------------------- #
+# Transient CDP context errors: ContextLostError / PageDisconnectedError
+# --------------------------------------------------------------------------- #
+
+
+class FlakyContextTab:
+    """A tab that raises a transient CDP error on the first navigation
+    attempt and recovers on the second. Mirrors the real DrissionPage
+    behaviour where the same tab handle is re-attached after the CDP
+    target briefly drops."""
+
+    def __init__(self, body: str, failure_factory) -> None:
+        self.html = body
+        self.url = "https://movie.douban.com/"
+        self._failure_factory = failure_factory
+        self._get_attempts = 0
+
+    def get(self, url: str, retry: int, timeout: int) -> bool:
+        self._get_attempts += 1
+        if self._get_attempts == 1:
+            raise self._failure_factory()
+        return True
+
+    def ele(self, locator: str, timeout: int):
+        if locator in DoubanMovieAdapter.SEARCH_INPUTS:
+            return SearchInput()
+        if locator == "css:.result-list":
+            return object()
+        return None
+
+
+class AlwaysLostTab:
+    """A tab whose every navigation raises the supplied transient error."""
+
+    def __init__(self, failure_factory) -> None:
+        self.html = "<html></html>"
+        self.url = "https://movie.douban.com/"
+        self._failure_factory = failure_factory
+
+    def get(self, url: str, retry: int, timeout: int) -> bool:
+        raise self._failure_factory()
+
+    def ele(self, locator: str, timeout: int):
+        if locator in DoubanMovieAdapter.SEARCH_INPUTS:
+            return SearchInput()
+        if locator == "css:.result-list":
+            return object()
+        return None
+
+
+@pytest.mark.parametrize(
+    "failure_factory",
+    [
+        lambda: ContextLostError(),
+        lambda: PageDisconnectedError(),
+    ],
+    ids=["ContextLostError", "PageDisconnectedError"],
+)
+def test_search_recovers_when_first_navigation_raises_transient_cdp_error(
+    failure_factory,
+) -> None:
+    tab = FlakyContextTab(html("search_results.html"), failure_factory)
+    candidates = DoubanMovieAdapter().search(tab, Task("a", "肖申克的救赎", "1994"))
+    # The second navigation succeeded, so we must get parsed candidates,
+    # not a swallowed UNEXPECTED_ERROR / NetworkError.
+    assert [c.title for c in candidates] == ["肖申克的救赎", "肖申克"]
+    # And the tab.get retry path was actually exercised exactly twice.
+    assert tab._get_attempts == 2
+
+
+@pytest.mark.parametrize(
+    "failure_factory",
+    [
+        lambda: ContextLostError(),
+        lambda: PageDisconnectedError(),
+    ],
+    ids=["ContextLostError", "PageDisconnectedError"],
+)
+def test_search_escalates_persistent_transient_cdp_error_to_network_error(
+    failure_factory,
+) -> None:
+    tab = AlwaysLostTab(failure_factory)
+    with pytest.raises(NetworkError, match=r"^context lost: "):
+        DoubanMovieAdapter().search(tab, Task("a", "肖申克的救赎", "1994"))
+
+
+class FlakyContextDetailTab:
+    """A tab that loses its CDP target on the first detail navigation,
+    then recovers on the second. Returns detail body on successful nav."""
+
+    def __init__(self, body: str, failure_factory) -> None:
+        self._body = body
+        self._failure_factory = failure_factory
+        self._get_attempts = 0
+        self.url = DETAIL_URL
+
+    @property
+    def html(self) -> str:
+        return self._body
+
+    def get(self, url: str, retry: int, timeout: int) -> bool:
+        self._get_attempts += 1
+        if self._get_attempts == 1:
+            raise self._failure_factory()
+        return True
+
+
+class AlwaysLostDetailTab:
+    def __init__(self, failure_factory) -> None:
+        self._body = "<html></html>"
+        self._failure_factory = failure_factory
+        self.url = DETAIL_URL
+
+    @property
+    def html(self) -> str:
+        return self._body
+
+    def get(self, url: str, retry: int, timeout: int) -> bool:
+        raise self._failure_factory()
+
+
+@pytest.mark.parametrize(
+    "failure_factory",
+    [
+        lambda: ContextLostError(),
+        lambda: PageDisconnectedError(),
+    ],
+    ids=["ContextLostError", "PageDisconnectedError"],
+)
+def test_fetch_detail_recovers_when_first_navigation_raises_transient_cdp_error(
+    failure_factory,
+) -> None:
+    candidate = Candidate("肖申克的救赎", "1994", "电影", DETAIL_URL)
+    tab = FlakyContextDetailTab(html("detail_movie.html"), failure_factory)
+    result = DoubanMovieAdapter().fetch_detail(tab, Task("a", "肖申克的救赎", "1994"), candidate)
+    assert result.status is Status.SUCCESS
+    assert result.matched_title == "肖申克的救赎"
+    assert tab._get_attempts == 2
+
+
+@pytest.mark.parametrize(
+    "failure_factory",
+    [
+        lambda: ContextLostError(),
+        lambda: PageDisconnectedError(),
+    ],
+    ids=["ContextLostError", "PageDisconnectedError"],
+)
+def test_fetch_detail_escalates_persistent_transient_cdp_error_to_network_error(
+    failure_factory,
+) -> None:
+    candidate = Candidate("肖申克的救赎", "1994", "电影", DETAIL_URL)
+    tab = AlwaysLostDetailTab(failure_factory)
+    with pytest.raises(NetworkError, match=r"^context lost: "):
+        DoubanMovieAdapter().fetch_detail(tab, Task("a", "肖申克的救赎", "1994"), candidate)
