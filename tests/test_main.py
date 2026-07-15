@@ -72,6 +72,20 @@ def test_parser_uses_stable_program_name() -> None:
     assert parser.prog == "browser-bot-demo"
 
 
+def test_run_command_parses_explicit_live_gate() -> None:
+    args = build_parser().parse_args(
+        [
+            "run",
+            "--input", "in.csv",
+            "--output", "out.xlsx",
+            "--live-approved",
+            "--max-queries", "7",
+        ]
+    )
+    assert args.live_approved is True
+    assert args.max_queries == 7
+
+
 # --------------------------------------------------------------------------- #
 # Test doubles for execute()
 # --------------------------------------------------------------------------- #
@@ -171,12 +185,23 @@ def stub_dependencies(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     return {"csv": csv, "out": out}
 
 
+def live_args(stub_dependencies: dict, *extra: str) -> list[str]:
+    return [
+        "run",
+        "--input", str(stub_dependencies["csv"]),
+        "--output", str(stub_dependencies["out"]),
+        "--live-approved",
+        "--max-queries", "1",
+        *extra,
+    ]
+
+
 # --------------------------------------------------------------------------- #
-# Parser contract — seven arguments + defaults
+# Parser contract — nine arguments + defaults
 # --------------------------------------------------------------------------- #
 
 
-def test_run_parser_exposes_seven_arguments_with_defaults() -> None:
+def test_run_parser_exposes_nine_arguments_with_defaults() -> None:
     parser = build_parser()
     args = parser.parse_args(["run", "--input", "in.csv", "--output", "out.xlsx"])
 
@@ -187,6 +212,8 @@ def test_run_parser_exposes_seven_arguments_with_defaults() -> None:
     assert args.min_interval == 5.0
     assert args.browser_path is None
     assert args.profile_dir == "browser-profile/douban"
+    assert args.live_approved is False
+    assert args.max_queries is None
 
     run_subparser = next(
         action.choices["run"]
@@ -206,7 +233,61 @@ def test_run_parser_exposes_seven_arguments_with_defaults() -> None:
         "min_interval",
         "browser_path",
         "profile_dir",
+        "live_approved",
+        "max_queries",
     }
+
+
+# --------------------------------------------------------------------------- #
+# Pre-browser live authorization gate
+# --------------------------------------------------------------------------- #
+
+
+def test_execute_requires_live_approval_before_browser(stub_dependencies: dict) -> None:
+    rc = execute([
+        "run", "--input", str(stub_dependencies["csv"]),
+        "--output", str(stub_dependencies["out"]),
+        "--max-queries", "1",
+    ])
+    assert rc == 2
+    assert _FakeBrowserSession.instances == []
+
+
+@pytest.mark.parametrize("value", [None, "0", "11"])
+def test_execute_requires_max_queries_between_one_and_ten(
+    stub_dependencies: dict, value: str | None
+) -> None:
+    arguments = [
+        "run", "--input", str(stub_dependencies["csv"]),
+        "--output", str(stub_dependencies["out"]),
+        "--live-approved",
+    ]
+    if value is not None:
+        arguments.extend(["--max-queries", value])
+    assert execute(arguments) == 2
+    assert _FakeBrowserSession.instances == []
+
+
+def test_execute_rejects_more_tasks_than_live_max(
+    stub_dependencies: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        main,
+        "load_tasks",
+        lambda _path: [Task("t1", "英雄", None), Task("t2", "英雄本色", None)],
+    )
+    assert execute(live_args(stub_dependencies)) == 2
+    assert _FakeBrowserSession.instances == []
+
+
+def test_execute_rejects_headless_live_run(stub_dependencies: dict) -> None:
+    assert execute(live_args(stub_dependencies, "--no-headed")) == 2
+    assert _FakeBrowserSession.instances == []
+
+
+def test_execute_rejects_live_interval_below_five(stub_dependencies: dict) -> None:
+    assert execute(live_args(stub_dependencies, "--min-interval", "4.99")) == 2
+    assert _FakeBrowserSession.instances == []
 
 
 # --------------------------------------------------------------------------- #
@@ -229,6 +310,8 @@ def test_execute_returns_2_for_missing_input_file(
             "missing.csv",
             "--output",
             str(stub_dependencies["out"]),
+            "--live-approved",
+            "--max-queries", "1",
         ]
     )
 
@@ -246,6 +329,8 @@ def test_execute_returns_2_for_invalid_retry_status(
             str(stub_dependencies["csv"]),
             "--output",
             str(stub_dependencies["out"]),
+            "--live-approved",
+            "--max-queries", "1",
             "--retry-status",
             "BOGUS",
         ]
@@ -258,15 +343,7 @@ def test_execute_returns_2_for_invalid_retry_status(
 def test_execute_passes_session_tab_to_runner_with_default_profile(
     stub_dependencies: dict,
 ) -> None:
-    rc = execute(
-        [
-            "run",
-            "--input",
-            str(stub_dependencies["csv"]),
-            "--output",
-            str(stub_dependencies["out"]),
-        ]
-    )
+    rc = execute(live_args(stub_dependencies))
 
     assert rc == 0
     assert len(_FakeRunner.instances) == 1
@@ -282,15 +359,7 @@ def test_execute_returns_0_when_summary_not_blocked(
 ) -> None:
     _FakeRunner.next_summary = RunSummary(processed=0, skipped=0, blocked=False)
 
-    rc = execute(
-        [
-            "run",
-            "--input",
-            str(stub_dependencies["csv"]),
-            "--output",
-            str(stub_dependencies["out"]),
-        ]
-    )
+    rc = execute(live_args(stub_dependencies))
 
     assert rc == 0
 
@@ -300,15 +369,7 @@ def test_execute_returns_3_when_summary_blocked(
 ) -> None:
     _FakeRunner.next_summary = RunSummary(processed=1, skipped=0, blocked=True)
 
-    rc = execute(
-        [
-            "run",
-            "--input",
-            str(stub_dependencies["csv"]),
-            "--output",
-            str(stub_dependencies["out"]),
-        ]
-    )
+    rc = execute(live_args(stub_dependencies))
 
     assert rc == 3
 
@@ -321,15 +382,7 @@ def test_execute_returns_4_for_output_locked_error(
 
     monkeypatch.setattr(main, "Runner", _explode)
 
-    rc = execute(
-        [
-            "run",
-            "--input",
-            str(stub_dependencies["csv"]),
-            "--output",
-            str(stub_dependencies["out"]),
-        ]
-    )
+    rc = execute(live_args(stub_dependencies))
 
     assert rc == 4
 
@@ -349,32 +402,18 @@ def test_execute_returns_5_for_browser_session_unexpected_error(
 
     monkeypatch.setattr(main, "BrowserSession", _BoomSession)
 
-    rc = execute(
-        [
-            "run",
-            "--input",
-            str(stub_dependencies["csv"]),
-            "--output",
-            str(stub_dependencies["out"]),
-        ]
-    )
+    rc = execute(live_args(stub_dependencies))
 
     assert rc == 5
 
 
 def test_execute_accepts_valid_retry_statuses(stub_dependencies: dict) -> None:
     rc = execute(
-        [
-            "run",
-            "--input",
-            str(stub_dependencies["csv"]),
-            "--output",
-            str(stub_dependencies["out"]),
-            "--retry-status",
-            "NOT_FOUND",
-            "--retry-status",
-            "REVIEW_REQUIRED",
-        ]
+        live_args(
+            stub_dependencies,
+            "--retry-status", "NOT_FOUND",
+            "--retry-status", "REVIEW_REQUIRED",
+        )
     )
 
     assert rc == 0

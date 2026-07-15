@@ -16,6 +16,9 @@ _ARTIFACTS_DIR = Path("artifacts")
 _PROFILE_DEFAULT = "browser-profile/douban"
 _MIN_INTERVAL_DEFAULT = 5.0
 
+_LIVE_MIN_INTERVAL = 5.0
+_LIVE_MAX_QUERIES = 10
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="browser-bot-demo")
@@ -33,19 +36,42 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run_parser.add_argument("--browser-path", default=None)
     run_parser.add_argument("--profile-dir", default=_PROFILE_DEFAULT)
+    run_parser.add_argument("--live-approved", action="store_true")
+    run_parser.add_argument("--max-queries", type=int, default=None)
 
     return parser
+
+
+def _validate_live_run(args: argparse.Namespace, task_count: int, logger) -> bool:
+    if not args.live_approved:
+        logger.error("Live run requires --live-approved")
+        return False
+    if args.max_queries is None or not 1 <= args.max_queries <= _LIVE_MAX_QUERIES:
+        logger.error("--max-queries must be between 1 and %s", _LIVE_MAX_QUERIES)
+        return False
+    if task_count > args.max_queries:
+        logger.error("Input has %s tasks but --max-queries is %s", task_count, args.max_queries)
+        return False
+    if not args.headed:
+        logger.error("Live run requires headed browser mode")
+        return False
+    if args.min_interval < _LIVE_MIN_INTERVAL:
+        logger.error("Live run requires --min-interval >= %.1f", _LIVE_MIN_INTERVAL)
+        return False
+    return True
 
 
 def execute(argv: list[str] | None = None) -> int:
     """Wire the run subcommand end-to-end and map outcomes to exit codes.
 
-    Sequence is fixed: parse args, configure logging, load input, convert
-    retry strings to ``Status`` (before any browser work), build the
-    Excel store, enter ``BrowserSession`` exactly once, hand the same
-    ``tab`` to ``Runner``, then exit the context. ``OutputLockedError``
-    is caught explicitly (exit 4); any other exception during the
-    browser/runner phase is treated as a global unexpected error (exit 5).
+    Sequence is fixed: parse args, configure logging, load input, then run
+    the live-run gate validation (before any retry parsing, store
+    construction, or browser work), convert retry strings to ``Status``,
+    build the Excel store, enter ``BrowserSession`` exactly once, hand
+    the same ``tab`` to ``Runner``, then exit the context.
+    ``OutputLockedError`` is caught explicitly (exit 4); any other
+    exception during the browser/runner phase is treated as a global
+    unexpected error (exit 5).
     """
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -56,6 +82,9 @@ def execute(argv: list[str] | None = None) -> int:
         tasks = load_tasks(Path(args.input))
     except ValueError as exc:
         logger.error("Input error: %s", exc)
+        return 2
+
+    if not _validate_live_run(args, len(tasks), logger):
         return 2
 
     try:
