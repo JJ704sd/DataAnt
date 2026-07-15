@@ -58,3 +58,64 @@ def test_non_unique_or_non_exact_cases_are_not_guessed(
     assert decision.method == MatchMethod.NONE
     assert decision.candidate_index is None
     assert decision.reason == "no unique deterministic match"
+
+
+@pytest.mark.parametrize(
+    "candidate_title",
+    [
+        "肖申克的救赎 The Shawshank Redemption",
+        "阿甘正传 / Forrest Gump",
+        "千与千寻：千と千尋の神隠し",
+        "盗梦空间（Inception）",
+    ],
+)
+def test_primary_title_boundary_and_year_selects_unique_candidate(
+    candidate_title: str,
+) -> None:
+    query = {
+        "肖申克的救赎 The Shawshank Redemption": "肖申克的救赎",
+        "阿甘正传 / Forrest Gump": "阿甘正传",
+        "千与千寻：千と千尋の神隠し": "千与千寻",
+        "盗梦空间（Inception）": "盗梦空间",
+    }[candidate_title]
+    task = Task("1", query, "1994")
+    decision = choose_match(task, [candidate(candidate_title, "1994")])
+    assert decision.method == MatchMethod.RULE_YEAR
+    assert decision.candidate_index == 0
+    assert decision.reason == "primary title and year"
+
+
+def test_primary_title_does_not_match_inside_a_longer_word() -> None:
+    decision = choose_match(
+        Task("1", "英雄", "2002"),
+        [candidate("英雄本色", "2002")],
+    )
+    assert decision.candidate_index is None
+
+
+def test_primary_title_requires_matching_year() -> None:
+    decision = choose_match(
+        Task("1", "肖申克的救赎", "1994"),
+        [candidate("肖申克的救赎 The Shawshank Redemption", "1995")],
+    )
+    assert decision.candidate_index is None
+
+
+def test_primary_title_requires_query_year() -> None:
+    decision = choose_match(
+        Task("1", "肖申克的救赎", None),
+        [candidate("肖申克的救赎 The Shawshank Redemption", "1994")],
+    )
+    assert decision.candidate_index is None
+
+
+def test_primary_title_and_year_remain_review_required_when_ambiguous() -> None:
+    decision = choose_match(
+        Task("1", "千与千寻", "2001"),
+        [
+            candidate("千与千寻 千と千尋の神隠し", "2001"),
+            candidate("千与千寻 舞台版", "2001"),
+        ],
+    )
+    assert decision.candidate_index is None
+    assert decision.reason == "no unique deterministic match"
