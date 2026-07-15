@@ -18,7 +18,7 @@
   6. `%ProgramFiles(x86)%\Microsoft\Edge\Application\msedge.exe`。
   全部缺失时启动即抛 `FileNotFoundError`，退出码 5。
 - **DrissionPage 许可**：DrissionPage 仅可用于非商业用途；若用于商业场景必须先取得版权方书面许可（见上游项目协议）。
-- **Compliance 审批（合规门禁）**：任何对真实豆瓣（`movie.douban.com`）的 live run 都必须在开始前留下**非空**的审批记录（谁批、批多少、批多久、采集哪些字段），并在 run 日志中引用。**缺失审批时只允许跑离线 fixture / `data:` 页面**，不得上线浏览器。
+- **Live-run 授权门禁**：任何对真实豆瓣（`movie.douban.com`）的 live run 必须在 CLI 上**显式**传 `--live-approved` 与 `--max-queries <1–10>`，并且 `app.main` 在启浏览器前会校验 headed 模式与 `--min-interval >= 5`；缺任一参数直接返回退出码 2，浏览器根本不会启动。这条把"操作员是否知情同意"这件事从外部审批表挪到了 CLI 上的不可绕过开关。
 - **数据边界**：只收集获批的公开字段（`task_id`、`query`、`query_year`、`matched_title`、`matched_year`、`director`、`rating`、`detail_url`、`match_method`、`status`、`error_message`、`collected_at` 共 12 列）。其它一切字段都不抓取。
 - **运行节奏**：默认**串行**执行，相邻任务间隔至少 `5` 秒（`--min-interval`），**不**代表任何形式的站点授权。
 
@@ -54,10 +54,10 @@ python -m app.main run --help
 
 ### 3.1 第一次受控 run
 
-仅在**审批记录非空**且**输入清单已获批**时执行。DrissionPage 启动的浏览器以 `--headed` 模式可见，**必须**使用项目自带的独立 `browser-profile/douban`，不得接管日常 Chrome 登录态。
+任何对真实豆瓣的 run 都必须**显式**传 `--live-approved` 与 `--max-queries <N>`（1 ≤ N ≤ 10），并满足 headed 模式与 `--min-interval >= 5`，否则 `app.main` 会在启浏览器前直接拒绝（退出码 2）。DrissionPage 启动的浏览器以 `--headed` 模式可见，**必须**使用项目自带的独立 `browser-profile/douban`，不得接管日常 Chrome 登录态。
 
 ```powershell
-python -m app.main run --input .\inputs\queries.example.csv --output .\outputs\douban_movies.xlsx --headed --min-interval 5 --profile-dir .\browser-profile\douban
+python -m app.main run --input .\inputs\queries.example.csv --output .\outputs\douban_movies.xlsx --live-approved --max-queries 1 --headed --min-interval 5 --profile-dir .\browser-profile\douban
 ```
 
 要点：
@@ -68,10 +68,10 @@ python -m app.main run --input .\inputs\queries.example.csv --output .\outputs\d
 
 ### 3.2 显式追加重试（定位器修复后）
 
-第二条命令只在**定位器已修复**、**离线 parser 单测全部通过**、且**重新获得合规审批**之后，才允许显式重跑 `PAGE_CHANGED`：
+第二条命令只在**定位器已修复**、**离线 parser 单测全部通过**之后，才允许显式重跑 `PAGE_CHANGED`；同样要带 `--live-approved` 与 `--max-queries`：
 
 ```powershell
-python -m app.main run --input .\inputs\queries.example.csv --output .\outputs\douban_movies.xlsx --headed --min-interval 5 --profile-dir .\browser-profile\douban --retry-status PAGE_CHANGED
+python -m app.main run --input .\inputs\queries.example.csv --output .\outputs\douban_movies.xlsx --live-approved --max-queries 1 --headed --min-interval 5 --profile-dir .\browser-profile\douban --retry-status PAGE_CHANGED
 ```
 
 - `--retry-status` 只在默认三状态之上**追加**，不会覆盖。
@@ -168,15 +168,16 @@ python -m app.main run --input .\inputs\queries.example.csv --output .\outputs\d
 
 执行下列步骤完成一次受控 Demo 验收：
 
-1. **审批记录非空**：确认 `Compliance` 审批表 / 邮件引用中存在本次采集范围；
-2. **固定获批输入**：使用 `inputs/queries.example.csv`（表头 `query,year`，无敏感数据），必要时用本任务 commit 后的同一份文件；
-3. **关闭 Excel**：在执行 run 命令前，关闭任何会打开 `outputs/douban_movies.xlsx` 的 Excel 进程；
-4. **有头运行**：用第 3.1 节命令跑一次，目视确认浏览器以 `headed` 模式启动、`browser-profile/douban` 是独立目录；
-5. **观察阻断**：故意把示例 CSV 里的 query 改成"高频敏感词"或临时阻断的样本，观察 `BLOCKED` 状态与退出码 3；
-6. **核对**：每条 `task_id` 唯一一行；`artifacts/` 下的截图 + HTML 已脱敏（不含 Cookie / Key）；
-7. **记录**：在项目日志里写明日期、环境、输入规模、状态数量、耗时。
+1. **显式传 `--live-approved`**：在 CLI 上确认本次 run 由操作员显式授权；
+2. **`--max-queries` 1–10**：确认 `--max-queries` 与输入 CSV 的查询数相匹配（输入不能多于上限）；
+3. **固定输入**：使用 `inputs/queries.example.csv`（表头 `query,year`，无敏感数据），必要时用本任务 commit 后的同一份文件；
+4. **关闭 Excel**：在执行 run 命令前，关闭任何会打开 `outputs/douban_movies.xlsx` 的 Excel 进程；
+5. **有头运行**：用第 3.1 节命令（含 `--live-approved --max-queries --headed --min-interval 5`）跑一次，目视确认浏览器以 `headed` 模式启动、`browser-profile/douban` 是独立目录；
+6. **观察阻断**：故意把示例 CSV 里的 query 改成"高频敏感词"或临时阻断的样本，观察 `BLOCKED` 状态与退出码 3；sec.douban.com 重定向、accounts.douban.com/passport/login 跳转会立即被 `is_blocked()` 捕获并抛 `BlockedError`；
+7. **核对**：每条 `task_id` 唯一一行；`artifacts/` 下的截图 + HTML 已脱敏（不含 Cookie / Key）；
+8. **记录**：在项目日志里写明日期、环境、输入规模、状态数量、耗时。
 
-完成上述七步且 `python -m pytest -q`、`python -m app.main run --help` 全部退出码 0，即视为本次受控 Demo 通过。
+完成上述八步且 `python -m pytest -q`、`python -m app.main run --help` 全部退出码 0，即视为本次受控 Demo 通过。
 
 ---
 
@@ -196,14 +197,16 @@ python -m app.main run --input .\inputs\queries.example.csv --output .\outputs\d
 
 | 项 | 离线（fixture / `data:` 页面） | Live run（真实豆瓣） |
 | -- | ---------------------------- | ------------------- |
-| 是否需要 Compliance 审批 | 否 | **是**（非空记录 + 输入清单获批） |
-| 跑什么 | `pytest -q` | `python -m app.main run ...` |
+| 是否需要 CLI 显式授权 | 否 | **是**（`--live-approved --max-queries N`） |
+| 跑什么 | `pytest -q` | `python -m app.main run --live-approved --max-queries N ...` |
 | 是否启浏览器 | 否 | 是（`headed` 模式） |
-| 数据落盘 | 不落 Excel | `outputs/*.xlsx` |
+| `--min-interval` | n/a | `>= 5` 秒（CLI 强校验） |
+| 数据落盘 | 不落 Excel | `outputs/*.xlsx`（1–10 行，verify_core 校验） |
 | 失败诊断 | 不截图 | `artifacts/<task_id>.{png,html}` |
 | 是否允许 `--retry-status BLOCKED` | n/a | **禁止** |
+| sec.douban.com / accounts.douban.com 重定向 | n/a | 立即判定 `BLOCKED`，停止批次 |
 
-如果 Compliance 审批为空，本次任务**只跑离线自检**，不执行 live run，并在交付回报中显式说明"live run 因合规门禁跳过"，而不是测试失败。
+如果操作员没有显式传 `--live-approved`，本次任务**只跑离线自检**，不执行 live run，并在交付回报中显式说明"live run 因 CLI 授权门禁跳过"，而不是测试失败。
 
 ---
 
@@ -231,17 +234,17 @@ python -m app.main run --input .\inputs\queries.example.csv --output .\outputs\d
 一个 release 真正可发，**除 CI 绿以外**还至少需要：
 
 1. **本地 `data:` browser smoke**：`scripts/browser_smoke.py`（data: URL、一次性、零网络）必须在 release host 上退出码 0；这证明浏览器路径在目标机器上仍可启动，CI runner 没机会验证这件事。
-2. **已批准的受控 workbook + approval evidence**：
-   - 落盘到 `outputs/<run>.xlsx` 的 12 列、10 行受控 workbook；
-   - 对应的 `evidence.json` 包含 `approval_reference`、`compliance_approved=true`、`approved_query_count=10`、`run_id`、`completed_at`；
-   - `scripts/verify_core.verify_controlled_workbook(workbook, evidence)` 必须通过。
-3. **审批记录可追溯**：本次 run 在合规审批表 / 邮件里有非空引用（谁批、批多少、批多久、采集哪些字段），run 日志里要能引用到。
+2. **受控 workbook 校验**：
+   - 落盘到 `outputs/<run>.xlsx` 的 12 列、1–10 行（任意 1 ≤ N ≤ 10）受控 workbook；
+   - `scripts/verify_core.verify_controlled_workbook(Path("outputs/<run>.xlsx"))` 必须返回 `{"data_rows": N, "unique_ids": N}`，workbook 任务 id 唯一、状态合法、`collected_at` 全填；
+   - 本任务不再要求独立的受控 evidence 文件，也不再读取任何外部审批字段 —— 那个责任现在落到 CLI 上的 `--live-approved` 开关 + 1–10 行 `--max-queries` 上限。
+3. **CLI 授权记录可追溯**：本次 run 的命令行必须能复现出来（`--live-approved --max-queries N --headed --min-interval 5`），run 日志里要能引用到。
 
 ### 8.3 缺证据时的处置
 
 - 缺本地 browser smoke → **BLOCKED**，不发布。
-- 缺已批准 workbook / approval evidence → **BLOCKED**，不发布。
-- 缺审批记录 → **BLOCKED**，**不允许**通过"跑一次真实豆瓣补一下"绕过 — 那等于把 CI 之外的 live 访问偷偷放进来，违反本仓库零网络、零 API Key 的红线。
+- 缺受控 workbook / `verify_controlled_workbook` 不通过 → **BLOCKED**，不发布。
+- 缺 CLI 授权的运行日志（`--live-approved` 与 `--max-queries`）→ **BLOCKED**，**不允许**通过"跑一次真实豆瓣补一下"绕过 — 那等于把 CI 之外的 live 访问偷偷放进来，违反本仓库零网络、零 API Key 的红线。
 - BLOCKED 必须显式记录在交付回报里（"因 X 证据缺失，release 仍处 BLOCKED"），而不是悄悄标"完成"。
 
 ### 8.4 MiniMax 集成延期
@@ -259,7 +262,7 @@ python -m app.main run --input .\inputs\queries.example.csv --output .\outputs\d
 5. `python -m scripts.verify_core --coverage-json artifacts/coverage.json`；
 6. `python -m pip check`；
 7. `python -m scripts.browser_smoke`（本地 `data:` 页面）；
-8. 已批准 workbook + `artifacts/controlled-demo-evidence.json` 校验（合规硬门禁）；
+8. 受控 workbook 校验（`verify_controlled_workbook(Path("outputs/<run>.xlsx"))` 必须返回 1–10 个唯一 task）；
 9. secret scan；
 10. tracked runtime artifact scan；
 11. `git diff --check` + `git status --short`；
@@ -267,4 +270,4 @@ python -m app.main run --input .\inputs\queries.example.csv --output .\outputs\d
 
 每一步的命令、退出码、关键证据与失败处置都写在 [`docs/superpowers/tasks/core-13-release-readiness.md`](docs/superpowers/tasks/core-13-release-readiness.md)。本 README 不复制完整 PowerShell，避免与该 spec 漂移；遇到 release 决策时直接打开该 spec 跑第 1–12 步，再按 spec 末尾的 Acceptance checklist 与最终报告模板汇报。
 
-> 第 8 步是合规硬门禁：`outputs/douban_movies.xlsx` 与 `artifacts/controlled-demo-evidence.json` 都**必须**由本任务之外的受控 Demo run 落盘，**不**能由 release 流程自己跑、不能伪造、不能下载。缺任一证据时整轮报告 `NOT_READY`，**绝不能**为了得到绿色结果而访问真实豆瓣。
+> 第 8 步是合规硬门禁：`outputs/<run>.xlsx` **必须**由本任务之外的真实受控 Demo run 落盘（带 `--live-approved --max-queries N` 启动），**不**能由 release 流程自己跑、不能伪造、不能下载。workbook 验证失败时整轮报告 `NOT_READY`，**绝不能**为了得到绿色结果而访问真实豆瓣。

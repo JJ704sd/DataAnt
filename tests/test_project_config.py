@@ -88,3 +88,26 @@ def test_core_ci_is_offline_and_runs_portable_verification() -> None:
     assert "minimax_api_key" not in body_lowered, (
         "CI job body must not read the MiniMax API key"
     )
+    assert "--live-approved" not in body_lowered, (
+        "CI job body must not enable the live-run CLI flag"
+    )
+    assert "--max-queries" not in body_lowered, (
+        "CI job body must not enable the max-queries CLI flag"
+    )
+
+
+def test_readme_documents_lightweight_live_gate_without_approval_evidence() -> None:
+    readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+    assert "--live-approved" in readme
+    assert "--max-queries" in readme
+    assert "controlled-demo-evidence.json" not in readme
+    assert "approval_reference" not in readme
+
+
+def test_core_13_uses_workbook_only_release_evidence() -> None:
+    spec = (
+        PROJECT_ROOT / "docs/superpowers/tasks/core-13-release-readiness.md"
+    ).read_text(encoding="utf-8")
+    assert "verify_controlled_workbook(workbook)" in spec
+    assert "controlled-demo-evidence.json" not in spec
+    assert "approval_reference" not in spec

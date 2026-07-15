@@ -4,11 +4,11 @@
 
 ```text
 你是 Core 13 的文档与最终验证代理。工作目录固定为 D:\DataAnt\.worktrees\browser-bot-demo。
-只读取本 spec（D:\DataAnt\.worktrees\browser-bot-demo\docs\superpowers\tasks\core-13-release-readiness.md）、README.md、scripts/、tests/、.github/workflows/ 与“Base / prerequisites”列出的工件；不得读取总计划。
+只读取本 spec（D:\DataAnt\.worktrees\browser-bot-demo\docs\superpowers/tasks/core-13-release-readiness.md）、README.md、scripts/、tests/、.github/workflows/ 与“Base / prerequisites”列出的工件；不得读取总计划。
 本任务只创建 docs/superpowers/tasks/core-13-release-readiness.md 并修改 README.md。不得改其他代码、配置、测试、CI 工作流或示例 CSV。
-按本文第 1–12 步逐条运行离线 release 门禁。所有命令必须从绝对 worktree cwd 执行；引用 evidence 校验时，先确认 outputs/douban_movies.xlsx 与 artifacts/controlled-demo-evidence.json 存在并通过 verify_core 校验，缺失则报告 NOT_READY。
-证据合规硬门禁：workbook 存在；evidence 存在；approval_reference 非空；compliance_approved 严格为 true；本任务自身不得访问豆瓣、不得伪造、下载或提交 workbook；不得实施或调用 MiniMax。
-完成后报告：Status: READY_TO_PUSH | NOT_READY | BLOCKED；每个门禁的退出码和关键证据；workbook evidence 校验摘要；已批准文件列表；commit hash；git status。
+按本文第 1–12 步逐条运行离线 release 门禁。所有命令必须从绝对 worktree cwd 执行；workbook 校验时先确认 outputs/<run>.xlsx 存在并通过 verify_controlled_workbook 校验（1–10 行唯一 task），缺失或不合规则报告 NOT_READY。
+证据合规硬门禁：workbook 存在；workbook 12 列严格匹配；1 ≤ 数据行数 ≤ 10；task_id 唯一；状态合法；collected_at 全填；本任务自身不得访问豆瓣、不得伪造、下载或提交 workbook；不得实施或调用 MiniMax。
+完成后报告：Status: READY_TO_PUSH | NOT_READY | BLOCKED；每个门禁的退出码和关键证据；workbook 校验摘要；已批准文件列表；commit hash；git status。
 任一门禁失败或证据缺失时报告 NOT_READY；保留原状、保留 commit 留本地、绝不为得到绿色结果而访问真实豆瓣。
 ```
 
@@ -17,17 +17,16 @@
 - 固定仓库：`D:\DataAnt\.worktrees\browser-bot-demo`。先验证 `git rev-parse --show-toplevel` 精确返回此路径。
 - 使用已存在的 `D:\DataAnt\.worktrees\browser-bot-demo\.venv\Scripts\python.exe`；禁止创建环境或运行安装。
 - Task 1–4 应当已合入 `feat/browser-bot-demo`，提交历史包含 `ci: add offline core release gate`。
-- Release readiness 强依赖两项外部工件，二者均**不**由本任务生成：
-  - `outputs/douban_movies.xlsx` —— 10 条受控 Demo 跑出的 12 列 workbook。
-  - `artifacts/controlled-demo-evidence.json` —— 含 `approval_reference`（非空字符串）、`compliance_approved`（严格 `true`）、`approved_query_count`（`10`）、`run_id`（非空）、`completed_at`（非空）。
-- 若上述任一证据缺失，本任务**必须**报告 `NOT_READY`，**绝不能**为了得到绿色结果访问真实豆瓣、伪造或下载 workbook。
+- Release readiness 强依赖一项外部工件，**不**由本任务生成：
+  - `outputs/<run>.xlsx` —— 受控 Demo 跑出的 12 列 workbook（1 ≤ N ≤ 10 行）。该 run 必须以 `--live-approved --max-queries N --headed --min-interval 5` 启动，作为可追溯的 CLI 授权记录；本任务不读独立的 evidence JSON。
+- 若上述工件缺失或 `scripts.verify_core.verify_controlled_workbook(Path("outputs/<run>.xlsx"))` 失败，本任务**必须**报告 `NOT_READY`，**绝不能**为了得到绿色结果访问真实豆瓣、伪造或下载 workbook。
 - 状态契约见 Core 12；八个合法状态：`SUCCESS`、`NOT_FOUND`、`REVIEW_REQUIRED`、`NETWORK_ERROR`、`PAGE_CHANGED`、`BLOCKED`、`OUTPUT_LOCKED`、`UNEXPECTED_ERROR`。
 - 浏览器 lifecycle 用本地 `data:` 页面验证；profile 位于 `browser-profile/smoke`，是 runtime artifact，不提交。
 - 离线 release gate 由 `scripts.verify_core` 负责，CI 与本地共用同一阈值；本任务必须显式跑它，不要绕过。
 
 ## Goal
 
-把 release readiness 的全部可重复 PowerShell 门禁沉淀到本 spec，让任何持有该文件的人都能在工作目录内一行行复现 12 步验证；同时确认 workbook + approval evidence 这两道合规硬门禁通过，把 `feat/browser-bot-demo` 推进到可以 push 的状态。
+把 release readiness 的全部可重复 PowerShell 门禁沉淀到本 spec，让任何持有该文件的人都能在工作目录内一行行复现 12 步验证；同时确认 workbook 校验这道合规硬门禁通过，把 `feat/browser-bot-demo` 推进到可以 push 的状态。"操作员知情同意"这件事已经从外部审批表挪到了 CLI 上的 `--live-approved` 开关 + 1–10 行 `--max-queries` 上限，本 spec 不再读取任何独立的 approval evidence。
 
 ## Files 边界
 
@@ -125,56 +124,43 @@ if ($LASTEXITCODE -ne 0) { throw 'browser smoke failed' }
 
 Expected: 退出码 0，stdout 含 `BROWSER_SMOKE_OK`；不发起任何 live host 请求，`browser-profile/smoke` 是 runtime artifact。
 
-### 8. 已批准 workbook + `controlled-demo-evidence` 校验（合规硬门禁）
+### 8. 受控 workbook 校验（合规硬门禁）
 
 ```powershell
 Set-Location -LiteralPath 'D:\DataAnt\.worktrees\browser-bot-demo'
 $Workbook = 'D:\DataAnt\.worktrees\browser-bot-demo\outputs\douban_movies.xlsx'
-$Evidence = 'D:\DataAnt\.worktrees\browser-bot-demo\artifacts\controlled-demo-evidence.json'
 
 if (-not (Test-Path -LiteralPath $Workbook)) {
     Write-Error 'NOT_READY: outputs/douban_movies.xlsx is missing'
     exit 11
 }
-if (-not (Test-Path -LiteralPath $Evidence)) {
-    Write-Error 'NOT_READY: artifacts/controlled-demo-evidence.json is missing'
-    exit 12
-}
 
 @'
-import json
 import sys
 from pathlib import Path
 
 from scripts.verify_core import verify_controlled_workbook
 
 workbook = Path(r'D:\DataAnt\.worktrees\browser-bot-demo\outputs\douban_movies.xlsx')
-evidence_path = Path(r'D:\DataAnt\.worktrees\browser-bot-demo\artifacts\controlled-demo-evidence.json')
 
 try:
-    summary = verify_controlled_workbook(workbook, evidence_path)
+    summary = verify_controlled_workbook(workbook)
 except AssertionError as exc:
-    print(f'EVIDENCE_REJECTED: {exc}')
+    print(f'WORKBOOK_REJECTED: {exc}')
     sys.exit(2)
 
-evidence = json.loads(evidence_path.read_text(encoding='utf-8'))
-print('approval_reference:', evidence['approval_reference'])
-print('compliance_approved:', evidence['compliance_approved'])
-print('approved_query_count:', evidence['approved_query_count'])
-print('run_id:', evidence['run_id'])
-print('completed_at:', evidence['completed_at'])
 print('summary:', summary)
 '@ | & 'D:\DataAnt\.worktrees\browser-bot-demo\.venv\Scripts\python.exe' -
-if ($LASTEXITCODE -ne 0) { throw 'workbook/evidence contract failed' }
-"WORKBOOK_EVIDENCE_OK"
+if ($LASTEXITCODE -ne 0) { throw 'workbook contract failed' }
+"WORKBOOK_OK"
 ```
 
 Expected:
 
-- 退出码 0；打印 `approval_reference:` 后是非空字符串；`compliance_approved: True`；`approved_query_count: 10`；`run_id` / `completed_at` 均非空；`summary: {'data_rows': 10, 'unique_ids': 10}`。
-- workbook / evidence 缺失时退出码非 0（`11` / `12`），整轮报告 `NOT_READY`，不要继续提交。
-- 任何字段违反契约（`compliance_approved` 不是 `true`、query 数不是 10、`approval_reference` 为空等）都直接 `EVIDENCE_REJECTED`，报告 `NOT_READY`。
-- **本任务自身不得访问豆瓣补跑、不得伪造、不得下载 workbook**。
+- 退出码 0；打印 `summary: {'data_rows': N, 'unique_ids': N}`，其中 `1 <= N <= 10`。
+- workbook 缺失时退出码非 0（`11`），整轮报告 `NOT_READY`，不要继续提交。
+- workbook 违反契约（列不匹配、task_id 不唯一、状态非法、`collected_at` 缺失、行数不在 1–10）都直接 `WORKBOOK_REJECTED`，报告 `NOT_READY`。
+- **本任务自身不得访问豆瓣补跑、不得伪造、不得下载 workbook**；对应的运行命令行（`--live-approved --max-queries N --headed --min-interval 5`）应当能在 run 日志里复现，作为可追溯的 CLI 授权记录。
 
 ### 9. secret scan
 
@@ -227,7 +213,7 @@ $AllSteps = @(
     'VERIFY_CORE_OK',
     'PIP_CHECK_OK',
     'BROWSER_SMOKE_OK',
-    'WORKBOOK_EVIDENCE_OK',
+    'WORKBOOK_OK',
     'SECRET_SCAN_OK',
     'TRACKED_ARTIFACTS_OK',
     'DIFF_STATUS_OK'
@@ -236,7 +222,7 @@ $AllSteps -join ', '
 "READY_TO_PUSH"
 ```
 
-Expected: 把 11 个步骤标记（`WORKBOOK_EVIDENCE_OK` 是合规硬门禁）逐一回放后打印 `READY_TO_PUSH`。任一缺失或失败，**整轮报告 `NOT_READY` 或 `BLOCKED`**，禁止手动拼接绿色结果。
+Expected: 把 11 个步骤标记（`WORKBOOK_OK` 是合规硬门禁）逐一回放后打印 `READY_TO_PUSH`。任一缺失或失败，**整轮报告 `NOT_READY` 或 `BLOCKED`**，禁止手动拼接绿色结果。
 
 ## 文档自审（提交前必跑）
 
@@ -273,8 +259,8 @@ Expected: staged 列表仅含 `docs/superpowers/tasks/core-13-release-readiness.
 ## Acceptance checklist
 
 - [ ] worktree cwd 与解释器均为指定绝对路径；Task 4 提交 `ci: add offline core release gate` 已在历史中。
-- [ ] 12 步门禁全部绿；`outputs/douban_movies.xlsx` 与 `artifacts/controlled-demo-evidence.json` 均存在并通过 `verify_controlled_workbook`。
-- [ ] `approval_reference` 非空、`compliance_approved` 严格 `True`、`approved_query_count` 为 `10`、workbook 严格 12 列、10 个唯一 task、八个合法状态、`collected_at` 全填。
+- [ ] 12 步门禁全部绿；`outputs/douban_movies.xlsx` 存在并通过 `verify_controlled_workbook`。
+- [ ] workbook 严格 12 列、1 ≤ 数据行 ≤ 10、task_id 唯一、八个合法状态、`collected_at` 全填；不再要求任何外部审批字段或独立 evidence 文件。
 - [ ] pytest 全绿；`scripts.verify_core` 三个纯逻辑/解析模块覆盖率各 ≥ 80%。
 - [ ] `pip check` 通过；本地 `data:` browser smoke 通过并正常关闭。
 - [ ] secret scan 无匹配；`outputs/`、`artifacts/`、`browser-profile/` 仅含允许的 `.gitkeep`。
