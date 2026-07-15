@@ -95,7 +95,8 @@ jobs:
         run: |
           set -e
           bad=$(git ls-files | \
-                grep -E '(^|/)(browser-profile|outputs|artifacts)/.+$' || true)
+                grep -E '(^|/)(browser-profile|outputs|artifacts)/.+$' | \
+                grep -vE '(^|/)(browser-profile|outputs|artifacts)/\.gitkeep$' || true)
           if [ -n "$bad" ]; then
             echo "::error::tracked runtime artifacts detected:"
             echo "$bad"

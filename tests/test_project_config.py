@@ -96,6 +96,26 @@ def test_core_ci_is_offline_and_runs_portable_verification() -> None:
     )
 
 
+def test_repository_agent_rules_define_the_lightweight_live_gate() -> None:
+    rules = (PROJECT_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    for required in (
+        "--live-approved",
+        "--max-queries",
+        "--headed",
+        "--min-interval 5",
+        "BLOCKED",
+        "sec.douban.com",
+    ):
+        assert required in rules
+
+
+def test_runtime_artifact_scan_allows_only_gitkeep_placeholders() -> None:
+    workflow = (
+        PROJECT_ROOT / ".github/workflows/core-offline.yml"
+    ).read_text(encoding="utf-8")
+    assert "grep -vE '(^|/)(browser-profile|outputs|artifacts)/\\.gitkeep$'" in workflow
+
+
 def test_readme_documents_lightweight_live_gate_without_approval_evidence() -> None:
     readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
     assert "--live-approved" in readme
