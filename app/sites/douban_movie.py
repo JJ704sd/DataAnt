@@ -41,6 +41,7 @@ class DoubanMovieAdapter:
         "@role=searchbox",
         "css:input[name='search_text']",
     )
+    EMPTY_RESULT_TEXT = ("没有找到", "暂无搜索结果")
 
     @staticmethod
     def is_blocked(html: str, status_code: int | None) -> bool:
@@ -93,6 +94,12 @@ class DoubanMovieAdapter:
                 return element
         raise PageChangedError("Search input was not found")
 
+    @classmethod
+    def _search_is_ready(cls, html: str) -> bool:
+        return bool(cls.parse_search_html(html)) or any(
+            marker in html for marker in cls.EMPTY_RESULT_TEXT
+        )
+
     def search(self, tab, task: Task) -> list[Candidate]:
         if not tab.get("https://movie.douban.com/", retry=0, timeout=20):
             raise NetworkError("Douban navigation failed")
@@ -100,11 +107,7 @@ class DoubanMovieAdapter:
             raise BlockedError("Douban blocked the batch")
         self._search_input(tab).input(f"{task.query}\n", clear=True)
         try:
-            wait_until(
-                lambda: bool(tab.ele("css:.result-list", timeout=0))
-                or "没有找到" in tab.html,
-                timeout=10,
-            )
+            wait_until(lambda: self._search_is_ready(tab.html), timeout=10)
         except TimeoutError as exc:
             raise PageChangedError("Search result marker was not found") from exc
         page_html = tab.html

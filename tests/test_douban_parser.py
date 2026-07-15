@@ -150,6 +150,17 @@ def test_search_returns_candidates_after_result_marker() -> None:
     assert [candidate.title for candidate in candidates] == ["肖申克的救赎", "肖申克"]
 
 
+def test_search_accepts_rendered_candidates_without_legacy_marker() -> None:
+    tab = LoadedTab(html("search_results_react.html"), result_marker=False)
+    candidates = DoubanMovieAdapter().search(
+        tab, Task("a", "肖申克的救赎", "1994")
+    )
+    assert [candidate.title for candidate in candidates] == [
+        "肖申克的救赎",
+        "肖申克",
+    ]
+
+
 def test_search_timeout_is_a_page_changed_error(monkeypatch: pytest.MonkeyPatch) -> None:
     def raise_timeout(predicate, timeout: int) -> None:
         raise TimeoutError
