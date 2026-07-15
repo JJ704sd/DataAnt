@@ -214,3 +214,26 @@ def test_fetch_detail_parses_loaded_page() -> None:
     )
     assert result.status == Status.SUCCESS
     assert result.matched_title == "肖申克的救赎"
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://sec.douban.com/c?r=https%3A%2F%2Fmovie.douban.com%2Fsubject%2F1%2F",
+        "https://accounts.douban.com/passport/login",
+    ],
+)
+def test_security_or_login_redirect_is_blocked(url: str) -> None:
+    assert DoubanMovieAdapter.is_blocked("<html></html>", None, url)
+
+
+@pytest.mark.parametrize("text", ["error code: 01004", "Please login"])
+def test_login_required_text_is_blocked(text: str) -> None:
+    assert DoubanMovieAdapter.is_blocked(text, 200, "https://movie.douban.com/")
+
+
+def test_fetch_detail_raises_blocked_on_security_redirect() -> None:
+    candidate = Candidate("电影", "1994", "电影", DETAIL_URL)
+    tab = LoadedTab("<html>正常页面</html>", url="https://sec.douban.com/c?r=foo")
+    with pytest.raises(BlockedError, match="blocked the batch"):
+        DoubanMovieAdapter().fetch_detail(tab, Task("a", "电影", None), candidate)

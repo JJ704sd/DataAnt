@@ -4,6 +4,7 @@ import re
 from dataclasses import replace
 from html import unescape
 from html.parser import HTMLParser
+from urllib.parse import urlparse
 
 from DrissionPage.common import wait_until
 
@@ -11,7 +12,11 @@ from app.models import Candidate, MatchMethod, MovieResult, Status, Task
 
 
 DETAIL_URL = re.compile(r"^https://movie\.douban\.com/subject/\d+/$")
-BLOCK_TEXT = ("访问频率过高", "异常请求", "验证码")
+BLOCK_TEXT = (
+    "访问频率过高", "异常请求", "验证码", "error code: 01004", "Please login",
+)
+BLOCK_HOSTS = {"sec.douban.com"}
+LOGIN_PATH = "/passport/login"
 _SUBJECT_LINK = re.compile(
     r'<a\b[^>]*href=["\'](https://movie\.douban\.com/subject/\d+/)["\'][^>]*>'
     r'(.*?)</a>(.*?)(?=<a\b[^>]*href=["\']https://movie\.douban\.com/subject/\d+/|$)',
@@ -164,8 +169,18 @@ class DoubanMovieAdapter:
     EMPTY_RESULT_TEXT = ("没有找到", "暂无搜索结果")
 
     @staticmethod
-    def is_blocked(html: str, status_code: int | None) -> bool:
-        return status_code in {403, 418, 429} or any(marker in html for marker in BLOCK_TEXT)
+    def is_blocked(html: str, status_code: int | None, url: str = "") -> bool:
+        parsed = urlparse(url)
+        redirected_to_login = (
+            parsed.hostname == "accounts.douban.com"
+            and parsed.path.rstrip("/") == LOGIN_PATH
+        )
+        return (
+            status_code in {403, 418, 429}
+            or parsed.hostname in BLOCK_HOSTS
+            or redirected_to_login
+            or any(marker in html for marker in BLOCK_TEXT)
+        )
 
     @staticmethod
     def parse_search_html(html: str) -> list[Candidate]:
@@ -214,7 +229,7 @@ class DoubanMovieAdapter:
     def search(self, tab, task: Task) -> list[Candidate]:
         if not tab.get("https://movie.douban.com/", retry=0, timeout=20):
             raise NetworkError("Douban navigation failed")
-        if self.is_blocked(tab.html, None):
+        if self.is_blocked(tab.html, None, tab.url):
             raise BlockedError("Douban blocked the batch")
         self._search_input(tab).input(f"{task.query}\n", clear=True)
         try:
@@ -222,7 +237,7 @@ class DoubanMovieAdapter:
         except TimeoutError as exc:
             raise PageChangedError("Search result marker was not found") from exc
         page_html = tab.html
-        if self.is_blocked(page_html, None):
+        if self.is_blocked(page_html, None, tab.url):
             raise BlockedError("Douban blocked the batch")
         return self.parse_search_html(page_html)
 
@@ -230,6 +245,6 @@ class DoubanMovieAdapter:
         if not tab.get(candidate.detail_url, retry=0, timeout=20):
             raise NetworkError("Douban detail navigation failed")
         page_html = tab.html
-        if self.is_blocked(page_html, None):
+        if self.is_blocked(page_html, None, tab.url):
             raise BlockedError("Douban blocked the batch")
         return self.parse_detail_html(page_html, task, tab.url)
