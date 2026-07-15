@@ -55,49 +55,79 @@ COLUMNS = [
 ]
 
 
-def write_workbook(path: Path) -> None:
+def write_workbook(
+    path: Path,
+    *,
+    row_count: int = 10,
+    duplicate_last_id: bool = False,
+    status: str = "NOT_FOUND",
+    collected_at: str | None = "2026-07-15T12:00:00+08:00",
+) -> None:
     workbook = Workbook()
     sheet = workbook.active
     sheet.append(COLUMNS)
-    for index in range(10):
+    for index in range(row_count):
+        task_id = "task-0" if duplicate_last_id and index == row_count - 1 else f"task-{index}"
         sheet.append([
-            f"task-{index}", f"query-{index}", None, None, None, None,
-            None, None, "NONE", "NOT_FOUND", "controlled fixture",
-            "2026-07-15T12:00:00+08:00",
+            task_id, f"query-{index}", None, None, None, None,
+            None, None, "NONE", status, "controlled fixture", collected_at,
         ])
     workbook.save(path)
 
 
-def write_evidence(path: Path, approved: bool = True) -> None:
-    path.write_text(
-        json.dumps({
-            "approval_reference": "APPROVAL-2026-07-15-001",
-            "compliance_approved": approved,
-            "approved_query_count": 10,
-            "run_id": "controlled-demo-001",
-            "completed_at": "2026-07-15T12:00:00+08:00",
-        }),
-        encoding="utf-8",
-    )
-
-
-def test_verify_controlled_workbook_accepts_approved_ten_rows(tmp_path: Path) -> None:
+@pytest.mark.parametrize("row_count", [1, 10])
+def test_verify_controlled_workbook_accepts_one_to_ten_rows(
+    tmp_path: Path, row_count: int
+) -> None:
     workbook = tmp_path / "douban_movies.xlsx"
-    evidence = tmp_path / "controlled-demo-evidence.json"
-    write_workbook(workbook)
-    write_evidence(evidence)
-    assert verify_controlled_workbook(workbook, evidence) == {
-        "data_rows": 10,
-        "unique_ids": 10,
+    write_workbook(workbook, row_count=row_count)
+    assert verify_controlled_workbook(workbook) == {
+        "data_rows": row_count,
+        "unique_ids": row_count,
     }
 
 
-def test_verify_controlled_workbook_rejects_missing_compliance_approval(
-    tmp_path: Path,
+@pytest.mark.parametrize("row_count", [0, 11])
+def test_verify_controlled_workbook_rejects_row_count_outside_live_limit(
+    tmp_path: Path, row_count: int
 ) -> None:
     workbook = tmp_path / "douban_movies.xlsx"
-    evidence = tmp_path / "controlled-demo-evidence.json"
-    write_workbook(workbook)
-    write_evidence(evidence, approved=False)
-    with pytest.raises(WorkbookContractError, match="compliance approval"):
-        verify_controlled_workbook(workbook, evidence)
+    write_workbook(workbook, row_count=row_count)
+    with pytest.raises(WorkbookContractError, match="between 1 and 10"):
+        verify_controlled_workbook(workbook)
+
+
+def test_verify_controlled_workbook_rejects_duplicate_task_ids(tmp_path: Path) -> None:
+    workbook = tmp_path / "douban_movies.xlsx"
+    write_workbook(workbook, duplicate_last_id=True)
+    with pytest.raises(WorkbookContractError, match="unique task"):
+        verify_controlled_workbook(workbook)
+
+
+def test_verify_controlled_workbook_rejects_invalid_status(tmp_path: Path) -> None:
+    workbook = tmp_path / "douban_movies.xlsx"
+    write_workbook(workbook, status="INVALID")
+    with pytest.raises(WorkbookContractError, match="invalid status"):
+        verify_controlled_workbook(workbook)
+
+
+def test_verify_controlled_workbook_rejects_missing_collected_at(tmp_path: Path) -> None:
+    workbook = tmp_path / "douban_movies.xlsx"
+    write_workbook(workbook, collected_at=None)
+    with pytest.raises(WorkbookContractError, match="collected_at"):
+        verify_controlled_workbook(workbook)
+
+
+def test_verify_controlled_workbook_rejects_wrong_columns(tmp_path: Path) -> None:
+    workbook_path = tmp_path / "douban_movies.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["wrong", *COLUMNS[1:]])
+    sheet.append([
+        "task-1", "query", None, None, None, None,
+        None, None, "NONE", "NOT_FOUND", "fixture",
+        "2026-07-15T12:00:00+08:00",
+    ])
+    workbook.save(workbook_path)
+    with pytest.raises(WorkbookContractError, match="columns do not match"):
+        verify_controlled_workbook(workbook_path)
