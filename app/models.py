@@ -34,7 +34,7 @@ class Task:
 class Candidate:
     title: str
     year: str | None
-    kind: str
+    kind: str | None
     detail_url: str
 
 
