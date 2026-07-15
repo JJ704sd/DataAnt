@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -266,7 +268,12 @@ def test_page_changed_error_writes_status_and_continues_batch() -> None:
     assert store.upserts[0].error_message == "layout shifted"
 
 
-def test_network_error_is_not_swallowed_and_writes_status() -> None:
+def test_network_error_is_not_swallowed_and_writes_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleeps: list[float] = []
+    monkeypatch.setattr("app.runner.time.sleep", lambda seconds: sleeps.append(seconds))
+
     store = FakeStore()
     adapter = FakeAdapter(
         search_results={"a": NetworkError("transient"), "b": []}
@@ -281,6 +288,8 @@ def test_network_error_is_not_swallowed_and_writes_status() -> None:
         Status.NOT_FOUND,
     ]
     assert store.upserts[0].error_message == "transient"
+    # Three attempts on task "a" with the 2/5-second backoff between them.
+    assert sleeps == [pytest.approx(2.0), pytest.approx(5.0)]
 
 
 # --------------------------------------------------------------------------- #
@@ -425,3 +434,381 @@ def test_upsert_updates_existing_task_id() -> None:
     # Single record persisted; status index reflects the new outcome.
     assert [result.task_id for result in store.upserts] == ["a"]
     assert store.status_by_task_id()["a"] is Status.NOT_FOUND
+
+
+# --------------------------------------------------------------------------- #
+# Diagnostics: redaction (app.diagnostics.redact)
+# --------------------------------------------------------------------------- #
+
+
+def test_redact_replaces_uppercase_minimax_api_key_value() -> None:
+    from app.diagnostics import redact
+
+    text = "Authorization header: MINIMAX_API_KEY=sk-secret-abc-123"
+    redacted = redact(text)
+
+    assert "sk-secret-abc-123" not in redacted
+    # The label is preserved so the log line still reads naturally.
+    assert "MINIMAX_API_KEY=" in redacted
+    assert "***" in redacted
+
+
+def test_redact_replaces_lowercase_minimax_api_key_value() -> None:
+    from app.diagnostics import redact
+
+    text = "config minimax_api_key=sk-lower-456"
+    redacted = redact(text)
+
+    assert "sk-lower-456" not in redacted
+
+
+def test_redact_replaces_mixed_case_minimax_api_key_value() -> None:
+    from app.diagnostics import redact
+
+    text = "MiniMax_API_KEY=sk-mixed-789"
+    redacted = redact(text)
+
+    assert "sk-mixed-789" not in redacted
+
+
+def test_redact_replaces_cookie_value() -> None:
+    from app.diagnostics import redact
+
+    text = "Request had Cookie: dbcl2=abc123456; bid=xyz987"
+    redacted = redact(text)
+
+    # The literal cookie values are scrubbed.
+    assert "abc123456" not in redacted
+    assert "xyz987" not in redacted
+    # The header label is preserved so the line still reads naturally.
+    assert "Cookie:" in redacted
+
+
+def test_redact_preserves_non_sensitive_text() -> None:
+    from app.diagnostics import redact
+
+    text = "Movie lookup succeeded for 英雄 (2002) with no errors"
+    assert redact(text) == text
+
+
+# --------------------------------------------------------------------------- #
+# Diagnostics: configure_logging
+# --------------------------------------------------------------------------- #
+
+
+def test_configure_logging_creates_browser_bot_logger_with_timestamped_file(
+    tmp_path: Path,
+) -> None:
+    from app.diagnostics import configure_logging
+
+    artifacts_dir = tmp_path / "artifacts"
+
+    logger = configure_logging(artifacts_dir)
+
+    assert logger.name == "browser_bot"
+    assert logger.level <= logging.INFO
+    assert artifacts_dir.is_dir()
+    log_files = list(artifacts_dir.glob("run-*.log"))
+    assert len(log_files) == 1
+    assert log_files[0].name.endswith(".log")
+    # Has both console and file handlers attached.
+    assert len(logger.handlers) >= 2
+
+
+def test_configure_logging_does_not_duplicate_handlers(tmp_path: Path) -> None:
+    from app.diagnostics import configure_logging
+
+    artifacts_dir = tmp_path / "artifacts"
+    logger1 = configure_logging(artifacts_dir)
+    handlers_after_first = len(logger1.handlers)
+
+    logger2 = configure_logging(artifacts_dir)
+
+    # Same logger instance, no duplicated handlers.
+    assert logger2 is logger1
+    assert len(logger2.handlers) == handlers_after_first
+    # Two timestamped files (one per call) so prior runs are not overwritten.
+    log_files = list(artifacts_dir.glob("run-*.log"))
+    assert len(log_files) == 2
+
+
+# --------------------------------------------------------------------------- #
+# Diagnostics: capture_failure
+# --------------------------------------------------------------------------- #
+
+
+class FakeTab:
+    """A minimal DrissionPage `tab` stand-in: `.html` and `.get_screenshot()`."""
+
+    def __init__(self, html: str = "no secrets here") -> None:
+        self.html = html
+        self.screenshot_calls: list[dict[str, Any]] = []
+
+    def get_screenshot(
+        self, path: Any = None, name: Any = None, full_page: Any = False
+    ) -> str:
+        if path is not None and name is not None:
+            output = Path(str(path)) / str(name)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(b"\x89PNG placeholder")
+            self.screenshot_calls.append(
+                {"path": str(path), "name": str(name), "full_page": full_page}
+            )
+            return str(output)
+        return ""
+
+
+def test_capture_failure_invokes_screenshot_and_writes_redacted_html(
+    tmp_path: Path,
+) -> None:
+    from app.diagnostics import capture_failure
+
+    tab = FakeTab(
+        html=(
+            "<html><body>"
+            "Token: MINIMAX_API_KEY=sk-real-secret-99 "
+            "Cookie: dbcl2=session-cookie-99"
+            "</body></html>"
+        )
+    )
+    artifacts_dir = tmp_path / "artifacts"
+
+    capture_failure(tab, artifacts_dir, "task-redact")
+
+    # Screenshot is called once with full_page=True.
+    assert len(tab.screenshot_calls) == 1
+    call = tab.screenshot_calls[0]
+    assert call["name"] == "task-redact.png"
+    assert call["full_page"] is True
+    assert Path(call["path"]) == artifacts_dir
+
+    # HTML on disk contains no secrets and is within the size cap.
+    html_file = artifacts_dir / "task-redact.html"
+    assert html_file.exists()
+    content = html_file.read_text(encoding="utf-8")
+    assert "sk-real-secret-99" not in content
+    assert "session-cookie-99" not in content
+    assert len(content) <= 200_000
+
+
+def test_capture_failure_truncates_html_to_200000_chars(tmp_path: Path) -> None:
+    from app.diagnostics import capture_failure
+
+    long_html = "x" * 250_000
+    tab = FakeTab(html=long_html)
+    artifacts_dir = tmp_path / "artifacts"
+
+    capture_failure(tab, artifacts_dir, "task-trunc")
+
+    html_file = artifacts_dir / "task-trunc.html"
+    content = html_file.read_text(encoding="utf-8")
+    assert len(content) == 200_000
+
+
+# --------------------------------------------------------------------------- #
+# Runner + diagnostics: capture only on failure statuses
+# --------------------------------------------------------------------------- #
+
+
+def test_success_status_does_not_trigger_screenshot_or_html_capture(
+    tmp_path: Path,
+) -> None:
+    tab = FakeTab(html="anything")
+    success_task = task("a")
+    adapter = FakeAdapter(search_results={"a": [candidate("英雄", "2002")]})
+    adapter.detail_results["a"] = successful_detail(
+        success_task, method=MatchMethod.NONE
+    )
+    store = FakeStore()
+    runner = make_runner(adapter, store, tab=tab, artifacts_dir=tmp_path)
+
+    runner.run([success_task])
+
+    assert tab.screenshot_calls == []
+    assert not (tmp_path / "a.html").exists()
+    assert not (tmp_path / "a.png").exists()
+    assert store.upserts[0].status is Status.SUCCESS
+
+
+def test_network_error_status_triggers_capture_with_redacted_html(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # Avoid the 2/5-second real-time backoff in this test.
+    monkeypatch.setattr("app.runner.time.sleep", lambda seconds: None)
+
+    secret_html = "MINIMAX_API_KEY=sk-net-secret-1"
+    tab = FakeTab(html=secret_html)
+    store = FakeStore()
+    adapter = FakeAdapter(search_results={"a": NetworkError("transient")})
+    runner = make_runner(adapter, store, tab=tab, artifacts_dir=tmp_path)
+
+    runner.run([task("a")])
+
+    assert len(tab.screenshot_calls) == 1
+    html_file = tmp_path / "a.html"
+    assert html_file.exists()
+    assert "sk-net-secret-1" not in html_file.read_text(encoding="utf-8")
+    assert store.upserts[0].status is Status.NETWORK_ERROR
+
+
+def test_page_changed_status_triggers_capture(tmp_path: Path) -> None:
+    tab = FakeTab(html="layout shifted")
+    store = FakeStore()
+    adapter = FakeAdapter(search_results={"a": PageChangedError("layout shifted")})
+    runner = make_runner(adapter, store, tab=tab, artifacts_dir=tmp_path)
+
+    runner.run([task("a")])
+
+    assert len(tab.screenshot_calls) == 1
+    assert (tmp_path / "a.html").exists()
+    assert store.upserts[0].status is Status.PAGE_CHANGED
+
+
+def test_blocked_status_triggers_capture(tmp_path: Path) -> None:
+    tab = FakeTab(html="captcha")
+    store = FakeStore()
+    adapter = FakeAdapter(search_results={"a": BlockedError("captcha")})
+    runner = make_runner(adapter, store, tab=tab, artifacts_dir=tmp_path)
+
+    runner.run([task("a")])
+
+    assert len(tab.screenshot_calls) == 1
+    assert (tmp_path / "a.html").exists()
+    assert store.upserts[0].status is Status.BLOCKED
+
+
+def test_unexpected_error_status_triggers_capture(tmp_path: Path) -> None:
+    tab = FakeTab(html="boom")
+    store = FakeStore()
+    adapter = FakeAdapter(
+        search_results={"a": ValueError("internal stack details")}
+    )
+    runner = make_runner(adapter, store, tab=tab, artifacts_dir=tmp_path)
+
+    runner.run([task("a")])
+
+    assert len(tab.screenshot_calls) == 1
+    assert (tmp_path / "a.html").exists()
+    result = store.upserts[0]
+    assert result.status is Status.UNEXPECTED_ERROR
+    # Exception message is not written to the workbook; only the type name is.
+    assert result.error_message == "ValueError"
+    assert "internal stack details" not in result.error_message
+
+
+def test_runner_without_artifacts_dir_skips_capture_silently() -> None:
+    tab = FakeTab(html="secret")
+    store = FakeStore()
+    adapter = FakeAdapter(search_results={"a": NetworkError("transient")})
+    runner = make_runner(adapter, store, tab=tab, artifacts_dir=None)
+
+    summary = runner.run([task("a")])
+
+    assert summary.processed == 1
+    assert tab.screenshot_calls == []
+    # Business status is still recorded.
+    assert store.upserts[0].status is Status.NETWORK_ERROR
+
+
+# --------------------------------------------------------------------------- #
+# Runner: network retry with 2/5-second backoff
+# --------------------------------------------------------------------------- #
+
+
+def test_network_operation_retries_three_times_with_2_and_5_second_sleeps(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    sleeps: list[float] = []
+    monkeypatch.setattr("app.runner.time.sleep", lambda seconds: sleeps.append(seconds))
+
+    tab = FakeTab()
+    store = FakeStore()
+    adapter = FakeAdapter(search_results={"a": NetworkError("transient")})
+    runner = make_runner(adapter, store, tab=tab, artifacts_dir=tmp_path)
+
+    summary = runner.run([task("a")])
+
+    assert summary.processed == 1
+    # 3 attempts on the search call, with the 2/5-second backoff between them.
+    assert len(adapter.search_calls) == 3
+    assert sleeps == [pytest.approx(2.0), pytest.approx(5.0)]
+    assert store.upserts[0].status is Status.NETWORK_ERROR
+    assert store.upserts[0].error_message == "transient"
+
+
+def test_network_operation_stops_after_success_on_second_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    sleeps: list[float] = []
+    monkeypatch.setattr("app.runner.time.sleep", lambda seconds: sleeps.append(seconds))
+
+    call_count = {"n": 0}
+
+    def flaky_search(tab: Any, task: Task) -> list[Candidate]:
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise NetworkError("first attempt fails")
+        return []
+
+    tab = FakeTab()
+    store = FakeStore()
+    adapter = FakeAdapter()
+    adapter.search = flaky_search  # type: ignore[method-assign]
+    runner = make_runner(adapter, store, tab=tab, artifacts_dir=tmp_path)
+
+    runner.run([task("a")])
+
+    # First attempt fails, second succeeds — no third attempt, no second sleep.
+    assert call_count["n"] == 2
+    assert sleeps == [pytest.approx(2.0)]
+    # Empty result becomes NOT_FOUND, not NETWORK_ERROR.
+    assert store.upserts[0].status is Status.NOT_FOUND
+
+
+# --------------------------------------------------------------------------- #
+# Runner: OutputLockedError is re-raised from store.upsert
+# --------------------------------------------------------------------------- #
+
+
+def test_output_locked_error_is_re_raised_from_run(tmp_path: Path) -> None:
+    from app.excel_store import OutputLockedError
+
+    tab = FakeTab()
+
+    class LockedStore(FakeStore):
+        def upsert(self, result: MovieResult) -> None:
+            raise OutputLockedError("Close Excel and retry")
+
+    store = LockedStore()
+    adapter = FakeAdapter()
+    runner = make_runner(adapter, store, tab=tab, artifacts_dir=tmp_path)
+
+    with pytest.raises(OutputLockedError, match="Close Excel and retry"):
+        runner.run([task("a")])
+
+
+# --------------------------------------------------------------------------- #
+# Runner: UNEXPECTED_ERROR with type name only
+# --------------------------------------------------------------------------- #
+
+
+def test_unclassified_exception_writes_unexpected_error_with_type_name_only(
+    tmp_path: Path,
+) -> None:
+    tab = FakeTab()
+    store = FakeStore()
+    adapter = FakeAdapter(
+        search_results={"a": ValueError("stack frames with secrets")}
+    )
+    runner = make_runner(adapter, store, tab=tab, artifacts_dir=tmp_path)
+
+    summary = runner.run([task("a")])
+
+    assert summary.processed == 1
+    result = store.upserts[0]
+    assert result.status is Status.UNEXPECTED_ERROR
+    assert result.error_message == "ValueError"
+    assert "stack frames with secrets" not in result.error_message
