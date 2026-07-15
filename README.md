@@ -204,3 +204,46 @@ python -m app.main run --input .\inputs\queries.example.csv --output .\outputs\d
 | 是否允许 `--retry-status BLOCKED` | n/a | **禁止** |
 
 如果 Compliance 审批为空，本次任务**只跑离线自检**，不执行 live run，并在交付回报中显式说明"live run 因合规门禁跳过"，而不是测试失败。
+
+---
+
+## 8. CI 与 Release Readiness
+
+### 8.1 CI 是什么、不是什么
+
+`.github/workflows/core-offline.yml` 是**离线核心 release gate**，故意做得很窄：
+
+- **CI 证明的**：在干净 Python 3.11 runner 上，离线确定性正确性（`pytest -q` + `pytest-cov` 覆盖率 JSON 通过 `scripts.verify_core` 阈值检查 + `git diff --check` + tracked runtime artifact / secret scan）。
+- **CI 故意不做的**：
+  - 不启动浏览器（`DrissionPage` / Chromium / Edge / `headed` 模式都不会出现）；
+  - 不访问 `movie.douban.com` 或任何 live host；
+  - 不读 `MINIMAX_API_KEY` 或调用 `api.minimax.com`；
+  - 不执行真实 LLM 调用；
+  - 不创建或伪造 `outputs/*.xlsx` 受控 workbook；
+  - 不上传 `browser-profile/`、`outputs/`、`artifacts/` 为 workflow artifact；
+  - 不重建本地 `.venv`，直接 `pip install -e ".[dev]"`。
+- `tests/test_project_config.py::test_core_ci_is_offline_and_runs_portable_verification` 把上述约束编码成配置契约，CI 改了工作流就必须同步通过这个测试。
+
+> **一句话：CI 绿 ≠ release 绿。** CI 只证明"在隔离环境里离线契约没破"，它无法证明"在 release host 上能起浏览器、能在真实豆瓣上工作、且本次 run 已被合规批准"。
+
+### 8.2 Release Readiness 还需要哪些证据
+
+一个 release 真正可发，**除 CI 绿以外**还至少需要：
+
+1. **本地 `data:` browser smoke**：`scripts/browser_smoke.py`（data: URL、一次性、零网络）必须在 release host 上退出码 0；这证明浏览器路径在目标机器上仍可启动，CI runner 没机会验证这件事。
+2. **已批准的受控 workbook + approval evidence**：
+   - 落盘到 `outputs/<run>.xlsx` 的 12 列、10 行受控 workbook；
+   - 对应的 `evidence.json` 包含 `approval_reference`、`compliance_approved=true`、`approved_query_count=10`、`run_id`、`completed_at`；
+   - `scripts/verify_core.verify_controlled_workbook(workbook, evidence)` 必须通过。
+3. **审批记录可追溯**：本次 run 在合规审批表 / 邮件里有非空引用（谁批、批多少、批多久、采集哪些字段），run 日志里要能引用到。
+
+### 8.3 缺证据时的处置
+
+- 缺本地 browser smoke → **BLOCKED**，不发布。
+- 缺已批准 workbook / approval evidence → **BLOCKED**，不发布。
+- 缺审批记录 → **BLOCKED**，**不允许**通过"跑一次真实豆瓣补一下"绕过 — 那等于把 CI 之外的 live 访问偷偷放进来，违反本仓库零网络、零 API Key 的红线。
+- BLOCKED 必须显式记录在交付回报里（"因 X 证据缺失，release 仍处 BLOCKED"），而不是悄悄标"完成"。
+
+### 8.4 MiniMax 集成延期
+
+`MINIMAX_API_KEY` 继续延期接入，本轮 CI 与 release 流程**不读**这个变量、不调用 `api.minimax.com`，LLM 路径在 CI 里被彻底切断。等专门的 MiniMax 接入任务上线时，再把 secret scan pattern 同步扩展并复用同一份 `scripts.verify_core` 阈值。
