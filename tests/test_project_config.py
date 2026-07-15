@@ -40,3 +40,51 @@ def test_browser_profile_placeholder_matches_gitignore_rules() -> None:
     assert all("playwright/.auth" not in rule.casefold() for rule in gitignore)
     assert (PROJECT_ROOT / "browser-profile" / ".gitkeep").is_file()
     assert not (PROJECT_ROOT / "playwright" / ".auth" / ".gitkeep").exists()
+
+
+def test_core_ci_is_offline_and_runs_portable_verification() -> None:
+    workflow_path = PROJECT_ROOT / ".github" / "workflows" / "core-offline.yml"
+    assert workflow_path.is_file(), "core-offline workflow must exist"
+    workflow = workflow_path.read_text(encoding="utf-8")
+
+    assert "python-version" in workflow, "workflow must pin a Python version"
+    assert "3.11" in workflow, "workflow must run on Python 3.11"
+    assert "pytest" in workflow, "workflow must run pytest"
+    assert "scripts.verify_core" in workflow, (
+        "workflow must invoke the portable core coverage gate"
+    )
+    assert ".venv" not in workflow, (
+        "workflow must not rebuild the local venv; install dev deps directly"
+    )
+
+    # The header (name + on + permissions + concurrency + top comment) is
+    # allowed to mention forbidden tokens when explaining WHY they are
+    # forbidden. Audit only the executable body: everything from the
+    # first `jobs:` block onwards.
+    jobs_marker = "\njobs:\n"
+    jobs_start = workflow.find(jobs_marker)
+    assert jobs_start != -1, "workflow must define a jobs: block"
+    body = workflow[jobs_start + len(jobs_marker):]
+    body_lowered = body.casefold()
+
+    assert "movie.douban.com" not in body_lowered, (
+        "CI job body must not reference the live Douban host"
+    )
+    assert "api.minimax.com" not in body_lowered, (
+        "CI job body must not call the MiniMax API"
+    )
+    assert "actions/upload-artifact" not in body_lowered, (
+        "CI must not upload workflow artifacts (browser-profile/ outputs/ artifacts/)"
+    )
+    assert "DrissionPage" not in body, (
+        "CI must not import or invoke the browser driver"
+    )
+    assert "playwright" not in body_lowered, (
+        "CI must not install or run playwright"
+    )
+    assert "headed" not in body_lowered, (
+        "CI must not launch a browser in headed mode"
+    )
+    assert "minimax_api_key" not in body_lowered, (
+        "CI job body must not read the MiniMax API key"
+    )

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import replace
+from html import unescape
+from html.parser import HTMLParser
 
 from DrissionPage.common import wait_until
 
@@ -10,6 +12,136 @@ from app.models import Candidate, MatchMethod, MovieResult, Status, Task
 
 DETAIL_URL = re.compile(r"^https://movie\.douban\.com/subject/\d+/$")
 BLOCK_TEXT = ("访问频率过高", "异常请求", "验证码")
+_SUBJECT_LINK = re.compile(
+    r'<a\b[^>]*href=["\'](https://movie\.douban\.com/subject/\d+/)["\'][^>]*>'
+    r'(.*?)</a>(.*?)(?=<a\b[^>]*href=["\']https://movie\.douban\.com/subject/\d+/|$)',
+    re.IGNORECASE | re.DOTALL,
+)
+_TAG = re.compile(r"<[^>]+>")
+_YEAR_AND_KIND = re.compile(r"\b((?:19|20)\d{2})\b\s*/\s*([^<\n]+)")
+_TRAILING_YEAR = re.compile(r"[(\uff08](\d{4})[)\uff09]\s*$")
+_INVISIBLE_MARKS = ("\u200e", "\u200f", "\ufeff")
+_MAX_CANDIDATES = 5
+
+
+def _text(fragment: str) -> str:
+    return " ".join(unescape(_TAG.sub(" ", fragment)).split())
+
+
+def _strip_invisible(text: str) -> str:
+    cleaned = text
+    for mark in _INVISIBLE_MARKS:
+        cleaned = cleaned.replace(mark, "")
+    return cleaned.strip()
+
+
+class _ItemRootCardParser(HTMLParser):
+    """Parse the rendered React search result DOM: <div class="item-root"> cards
+    where the same subject URL is repeated on a.cover-link and a.title-text.
+    We prefer a.title-text for the visible title and strip trailing U+200E /
+    U+200F / U+FEFF marks before extracting the year from " (YYYY)".
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._cards: list[dict[str, str | None]] = []
+        self._div_stack: list[str] = []
+        self._current: dict[str, str | None] | None = None
+        self._card_entry_depth: int | None = None
+        self._capture_href: str | None = None
+        self._capture_text: bool = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attr_map = {name: (value or "") for name, value in attrs}
+        classes = (attr_map.get("class") or "").split()
+        if tag == "div":
+            if self._current is None and "item-root" in classes:
+                self._current = {"title": None, "href": None}
+                self._card_entry_depth = len(self._div_stack)
+            self._div_stack.append(" ".join(classes))
+            return
+        if self._current is None:
+            return
+        if tag == "a":
+            href = attr_map.get("href") or ""
+            if DETAIL_URL.match(href):
+                self._capture_href = href
+                self._capture_text = "title-text" in classes
+
+    def handle_data(self, data: str) -> None:
+        if self._current is None or self._capture_href is None or not self._capture_text:
+            return
+        self._current["title"] = data
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "a" and self._capture_href is not None:
+            if self._current is not None and self._current["href"] is None:
+                self._current["href"] = self._capture_href
+            self._capture_href = None
+            self._capture_text = False
+            return
+        if tag != "div":
+            return
+        if not self._div_stack:
+            return
+        self._div_stack.pop()
+        if (
+            self._current is not None
+            and self._card_entry_depth is not None
+            and len(self._div_stack) == self._card_entry_depth
+        ):
+            self._cards.append(self._current)
+            self._current = None
+            self._card_entry_depth = None
+
+    @property
+    def cards(self) -> list[dict[str, str | None]]:
+        return self._cards
+
+
+def _parse_item_root_cards(html: str) -> list[Candidate]:
+    parser = _ItemRootCardParser()
+    parser.feed(html)
+    candidates: list[Candidate] = []
+    seen: set[str] = set()
+    for card in parser.cards:
+        href = card.get("href")
+        raw_title = card.get("title")
+        if not href or not raw_title:
+            continue
+        if href in seen:
+            continue
+        title = _strip_invisible(raw_title)
+        if not title:
+            continue
+        year_match = _TRAILING_YEAR.search(title)
+        if year_match is None:
+            continue
+        title = title[: year_match.start()].strip()
+        year = year_match.group(1)
+        if not title:
+            continue
+        seen.add(href)
+        candidates.append(Candidate(title, year, "电影", href))
+        if len(candidates) == _MAX_CANDIDATES:
+            break
+    return candidates
+
+
+def _parse_legacy_subject_links(html: str) -> list[Candidate]:
+    candidates: list[Candidate] = []
+    for url, anchor_html, trailing_html in _SUBJECT_LINK.findall(html):
+        title = _text(anchor_html)
+        metadata = _text(trailing_html)
+        match = _YEAR_AND_KIND.search(metadata)
+        if not title or match is None:
+            continue
+        candidates.append(
+            Candidate(title, match.group(1), match.group(2).strip(), url)
+        )
+        if len(candidates) == _MAX_CANDIDATES:
+            break
+    return candidates
 
 
 class BlockedError(RuntimeError):
@@ -29,6 +161,7 @@ class DoubanMovieAdapter:
         "@role=searchbox",
         "css:input[name='search_text']",
     )
+    EMPTY_RESULT_TEXT = ("没有找到", "暂无搜索结果")
 
     @staticmethod
     def is_blocked(html: str, status_code: int | None) -> bool:
@@ -36,14 +169,10 @@ class DoubanMovieAdapter:
 
     @staticmethod
     def parse_search_html(html: str) -> list[Candidate]:
-        links = re.findall(
-            r'<a[^>]+href="(https://movie\.douban\.com/subject/\d+/)"[^>]*>([^<]+)</a>\s*<span>(\d{4})\s*/\s*([^<]+)</span>',
-            html,
-        )
-        return [
-            Candidate(title.strip(), year, kind.strip(), url)
-            for url, title, year, kind in links[:5]
-        ]
+        rendered = _parse_item_root_cards(html)
+        if rendered:
+            return rendered
+        return _parse_legacy_subject_links(html)
 
     @staticmethod
     def parse_detail_html(html: str, task: Task, url: str) -> MovieResult:
@@ -76,6 +205,12 @@ class DoubanMovieAdapter:
                 return element
         raise PageChangedError("Search input was not found")
 
+    @classmethod
+    def _search_is_ready(cls, html: str) -> bool:
+        return bool(cls.parse_search_html(html)) or any(
+            marker in html for marker in cls.EMPTY_RESULT_TEXT
+        )
+
     def search(self, tab, task: Task) -> list[Candidate]:
         if not tab.get("https://movie.douban.com/", retry=0, timeout=20):
             raise NetworkError("Douban navigation failed")
@@ -83,11 +218,7 @@ class DoubanMovieAdapter:
             raise BlockedError("Douban blocked the batch")
         self._search_input(tab).input(f"{task.query}\n", clear=True)
         try:
-            wait_until(
-                lambda: bool(tab.ele("css:.result-list", timeout=0))
-                or "没有找到" in tab.html,
-                timeout=10,
-            )
+            wait_until(lambda: self._search_is_ready(tab.html), timeout=10)
         except TimeoutError as exc:
             raise PageChangedError("Search result marker was not found") from exc
         page_html = tab.html

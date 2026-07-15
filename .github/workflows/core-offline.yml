@@ -1,0 +1,117 @@
+name: core-offline
+
+# DataAnt Core release gate.
+#
+# Scope (deliberately narrow):
+#   - Prove the deterministic offline correctness of the core parser /
+#     matcher / input-loader stack on a fresh Python 3.11 runner.
+#   - Run the portable coverage gate (scripts.verify_core) against the
+#     threshold defined in scripts/verify_core.py.
+#
+# Out of scope (must NOT happen here, by design):
+#   - Launching a browser (DrissionPage, Chromium, Edge, ...).
+#   - Reaching movie.douban.com or any other live host.
+#   - Reading MINIMAX_API_KEY or any other real LLM credential.
+#   - Executing a real LLM call against any provider.
+#   - Creating or fabricating a controlled workbook.
+#   - Uploading browser-profile/, outputs/, or artifacts/ as workflow
+#     artifacts.
+#
+# Release readiness still requires, on top of a green CI:
+#   1. A local data: browser smoke (scripts/browser_smoke.py) — proves
+#      the live browser path is still operable on the release host.
+#   2. An approved controlled workbook plus its approval evidence — a
+#      CI run is NOT a substitute for compliance approval.
+# Without those, the release is BLOCKED; CI must not be bypassed to
+# reach movie.douban.com "just to make sure".
+#
+# MiniMax integration continues to be deferred.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: core-offline-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline-core:
+    name: offline core release gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # CI is deterministic and offline. No live LLM key, no proxy.
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install project + dev dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: pip check (dependency consistency)
+        run: python -m pip check
+
+      - name: Run pytest with coverage JSON
+        run: |
+          python -m pytest \
+            --cov=app \
+            --cov-report=json:coverage.json \
+            --cov-report=term-missing \
+            -q
+
+      - name: Enforce portable core coverage threshold
+        run: |
+          python -m scripts.verify_core --coverage-json coverage.json
+
+      - name: git diff --check (whitespace / conflict markers)
+        run: |
+          if ! git diff --check HEAD~1 HEAD; then
+            echo "::error::git diff --check failed on the latest commit."
+            exit 1
+          fi
+
+      - name: Scan tracked tree for runtime artifacts
+        run: |
+          set -e
+          bad=$(git ls-files | \
+                grep -E '(^|/)(browser-profile|outputs|artifacts)/.+$' || true)
+          if [ -n "$bad" ]; then
+            echo "::error::tracked runtime artifacts detected:"
+            echo "$bad"
+            exit 1
+          fi
+
+      - name: Scan tracked tree for secret-like literals
+        run: |
+          set -e
+          # Match common live-provider hosts and high-entropy token prefixes.
+          # The audit must stay provider-agnostic; if a new live target is
+          # added, extend this list in the same commit that adds the path.
+          patterns='(sk-[A-Za-z0-9_-]{16,}|movie\.douban\.com|api\.minimax\.com|api\.MiniMax\.com)'
+          bad=$(git grep -nE "$patterns" || true)
+          if [ -n "$bad" ]; then
+            echo "::error::tracked secret / live-host reference detected:"
+            echo "$bad"
+            exit 1
+          fi
