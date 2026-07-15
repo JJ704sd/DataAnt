@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import replace
+from html import unescape
 
 from DrissionPage.common import wait_until
 
@@ -10,6 +11,17 @@ from app.models import Candidate, MatchMethod, MovieResult, Status, Task
 
 DETAIL_URL = re.compile(r"^https://movie\.douban\.com/subject/\d+/$")
 BLOCK_TEXT = ("访问频率过高", "异常请求", "验证码")
+_SUBJECT_LINK = re.compile(
+    r'<a\b[^>]*href=["\'](https://movie\.douban\.com/subject/\d+/)["\'][^>]*>'
+    r'(.*?)</a>(.*?)(?=<a\b[^>]*href=["\']https://movie\.douban\.com/subject/\d+/|$)',
+    re.IGNORECASE | re.DOTALL,
+)
+_TAG = re.compile(r"<[^>]+>")
+_YEAR_AND_KIND = re.compile(r"\b((?:19|20)\d{2})\b\s*/\s*([^<\n]+)")
+
+
+def _text(fragment: str) -> str:
+    return " ".join(unescape(_TAG.sub(" ", fragment)).split())
 
 
 class BlockedError(RuntimeError):
@@ -36,14 +48,19 @@ class DoubanMovieAdapter:
 
     @staticmethod
     def parse_search_html(html: str) -> list[Candidate]:
-        links = re.findall(
-            r'<a[^>]+href="(https://movie\.douban\.com/subject/\d+/)"[^>]*>([^<]+)</a>\s*<span>(\d{4})\s*/\s*([^<]+)</span>',
-            html,
-        )
-        return [
-            Candidate(title.strip(), year, kind.strip(), url)
-            for url, title, year, kind in links[:5]
-        ]
+        candidates: list[Candidate] = []
+        for url, anchor_html, trailing_html in _SUBJECT_LINK.findall(html):
+            title = _text(anchor_html)
+            metadata = _text(trailing_html)
+            match = _YEAR_AND_KIND.search(metadata)
+            if not title or match is None:
+                continue
+            candidates.append(
+                Candidate(title, match.group(1), match.group(2).strip(), url)
+            )
+            if len(candidates) == 5:
+                break
+        return candidates
 
     @staticmethod
     def parse_detail_html(html: str, task: Task, url: str) -> MovieResult:
