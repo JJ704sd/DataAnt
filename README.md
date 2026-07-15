@@ -247,3 +247,24 @@ python -m app.main run --input .\inputs\queries.example.csv --output .\outputs\d
 ### 8.4 MiniMax 集成延期
 
 `MINIMAX_API_KEY` 继续延期接入，本轮 CI 与 release 流程**不读**这个变量、不调用 `api.minimax.com`，LLM 路径在 CI 里被彻底切断。等专门的 MiniMax 接入任务上线时，再把 secret scan pattern 同步扩展并复用同一份 `scripts.verify_core` 阈值。
+
+### 8.5 Release Readiness 12 步门禁
+
+把 release 从"CI 绿"推进到"READY_TO_PUSH"需要 12 步可逐条复制的 PowerShell 门禁：
+
+1. 精确 worktree 路径；
+2. 初始 git status 干净；
+3. `pytest -q`；
+4. `pytest --cov=app --cov-report=json:artifacts/coverage.json -v`；
+5. `python -m scripts.verify_core --coverage-json artifacts/coverage.json`；
+6. `python -m pip check`；
+7. `python -m scripts.browser_smoke`（本地 `data:` 页面）；
+8. 已批准 workbook + `artifacts/controlled-demo-evidence.json` 校验（合规硬门禁）；
+9. secret scan；
+10. tracked runtime artifact scan；
+11. `git diff --check` + `git status --short`；
+12. 全部通过才能输出 `READY_TO_PUSH`。
+
+每一步的命令、退出码、关键证据与失败处置都写在 [`docs/superpowers/tasks/core-13-release-readiness.md`](docs/superpowers/tasks/core-13-release-readiness.md)。本 README 不复制完整 PowerShell，避免与该 spec 漂移；遇到 release 决策时直接打开该 spec 跑第 1–12 步，再按 spec 末尾的 Acceptance checklist 与最终报告模板汇报。
+
+> 第 8 步是合规硬门禁：`outputs/douban_movies.xlsx` 与 `artifacts/controlled-demo-evidence.json` 都**必须**由本任务之外的受控 Demo run 落盘，**不**能由 release 流程自己跑、不能伪造、不能下载。缺任一证据时整轮报告 `NOT_READY`，**绝不能**为了得到绿色结果而访问真实豆瓣。
