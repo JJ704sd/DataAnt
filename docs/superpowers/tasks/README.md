@@ -13,6 +13,34 @@
 
 ## 推荐执行顺序
 
+### web-scraping.dev 商品采集与可视化画廊
+
+以下任务从提交 `c109a13` 开始，必须在同一分支中按顺序执行。每份文件顶部都有可直接
+复制的操作提示词；执行代理不需要读取总计划。
+
+1. [Product 00 — 恢复绿色基线](product-00-green-baseline.md)
+2. [Product 01 — 共享错误与商品模型](product-01-domain-models.md)
+3. [Product 02 — web-scraping.dev 站点适配器](product-02-site-adapter.md)
+4. [Product 03 — 商品分页运行器](product-03-runner.md)
+5. [Product 04 — 商品 Excel 输出](product-04-excel-output.md)
+6. [Product 05 — JSON 与静态画廊](product-05-json-gallery.md)
+7. [Product 06 — 三产物原子输出包](product-06-output-bundle.md)
+8. [Product 07 — 受控商品采集 CLI](product-07-cli.md)
+9. [Product 08 — 跨产物验证与离线 CI](product-08-verification-ci.md)
+10. [Product 09 — README 与离线交付验证](product-09-readme-delivery.md)
+11. [Product 10 — 最终发布与条件式现场验收](product-10-release-live-check.md)
+
+Product 00–09 不得访问任何真实网站。Product 09 只允许打开由 fixture 生成的本地
+`gallery.html`。Product 10 先执行离线门禁；只有操作者在该次执行中重新明确批准后，
+才允许使用：
+
+```text
+--live-approved --max-products N --headed --min-interval 2
+```
+
+其中 `1 <= N <= 10`。没有本次授权时，真实网站步骤必须记录为
+`SKIPPED_NOT_APPROVED`，不能把设计批准、计划批准或历史 live run 当作授权。
+
 ### Core
 
 1. [Core 03 — Deterministic Matcher](core-03-deterministic-matcher.md)
