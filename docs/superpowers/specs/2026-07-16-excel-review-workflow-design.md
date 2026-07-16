@@ -308,6 +308,52 @@ the existing exit-code scheme.
 - Logs contain `review_id`, `task_id`, stage, status, and elapsed time, but no
   Cookie, browser profile, full HTML, or sensitive request metadata.
 
+## Forward compatibility: automated batches and recovery
+
+The next planned capability after the human-review loop is automated batch
+execution and recovery. This design must therefore leave stable seams for a
+future batch coordinator without turning the current Douban workflow into an
+unattended crawler.
+
+The current implementation plan will preserve the following boundaries:
+
+- review validation produces an immutable execution plan with stable action
+  identities;
+- each applied action has an explicit lifecycle state rather than relying only
+  on row position;
+- persistence can checkpoint one completed action at a time through atomic
+  workbook replacement;
+- runners accept an already validated collection of actions and return a
+  structured summary of processed, skipped, retryable, and stopped work;
+- retry eligibility is derived from recorded status and an explicit policy;
+- repeated invocation is safe and skips terminal actions;
+- stop reasons distinguish operator-correctable input, transient technical
+  failure, output locking, page change, hard blocking, and site-protection
+  challenge;
+- live authorization remains a CLI boundary and is not embedded in a saved plan,
+  workbook, scheduled task, or reusable credential.
+
+For Douban, “automated batch” means an operator starts each controlled invocation
+with `--live-approved`, `--max-queries N` where `1 <= N <= 10`, headed mode, and
+an interval of at least five seconds. Within that invocation the program may
+checkpoint progress, skip completed actions, and resume retryable actions.
+It must not automatically launch the next live batch, schedule a later retry,
+wait through a site-protection window, or reuse prior approval.
+
+A later generic batch layer may provide:
+
+- a durable `batch_id` and run manifest;
+- `plan`, `run`, `status`, and `resume` commands;
+- per-action attempt history and aggregate progress;
+- dry-run validation and estimated live-query counts;
+- explicit retry policies for transient statuses;
+- machine-readable JSON summaries alongside the human workbook;
+- pluggable execution backends for data sources whose authorization permits
+  unattended operation.
+
+Those capabilities are not implemented in this round. The review workflow only
+establishes the state model and idempotent execution contract they will consume.
+
 ## Testing strategy
 
 Implementation follows test-driven development.
@@ -382,7 +428,7 @@ This round does not:
 - build a web review interface;
 - automate login, CAPTCHA solving, or site-protection challenges;
 - increase the ten-query live ceiling;
-- schedule unattended live jobs;
+- schedule unattended live jobs or automatically chain Douban batches;
 - add a second site adapter;
 - allow arbitrary non-Douban URLs;
 - change the 12-column `movies` schema;
