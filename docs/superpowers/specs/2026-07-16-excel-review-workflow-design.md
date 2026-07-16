@@ -1,58 +1,53 @@
-# Excel Candidate Review Workflow Design
+# Excel 候选项人工复核流程设计
 
-## Objective
+## 目标
 
-Extend the current controlled Douban movie demo with an auditable human-review
-loop for ambiguous search results. The existing `movies` worksheet remains the
-authoritative 12-column result table. A second `review_queue` worksheet records
-candidate snapshots and human decisions, and a new explicit `apply-review`
-command validates the complete pending batch before performing any live access.
+为当前受控豆瓣电影 Demo 增加可审计的人工复核闭环，用于处理存在
+歧义的搜索结果。现有 `movies` 工作表继续作为权威的 12 列结果表；
+新增 `review_queue` 工作表记录候选快照和人工决策；新增显式
+`apply-review` 命令，在发生任何真实联网访问前验证完整待处理批次。
 
-The design targets the largest observed quality gap in the current controlled
-workbook: most rows are `REVIEW_REQUIRED`, while deterministic matching, live-run
-authorization, resume behavior, offline CI, and site-protection stopping rules
-are already implemented.
+该设计针对当前受控工作簿中最明显的质量缺口：大部分数据行为
+`REVIEW_REQUIRED`。确定性匹配、真实联网授权、断点续跑、离线 CI 和
+站点保护停止规则均已实现。
 
-## Confirmed baseline
+## 确认基线
 
-The design is based on `main` at commit `3299ce3`:
+该设计基于提交 `3299ce3` 处的 `main`：
 
-- the complete offline suite passes with 164 tests;
-- live commands require `--live-approved`, `--max-queries 1..10`, headed mode,
-  and `--min-interval >= 5`;
-- the runner stops on `BLOCKED` and `SITE_PROTECTION_CHALLENGE`;
-- `movies` uses a fixed 12-column schema and `task_id` upserts;
-- deterministic matching supports normalized exact title, title plus year, and
-  unique primary-title-prefix plus year;
-- a controlled 10-row workbook passes the workbook verifier, with the observed
-  distribution `SUCCESS=1`, `REVIEW_REQUIRED=6`, and `UNEXPECTED_ERROR=3`;
-- an older MiniMax candidate-matcher plan exists, but no LLM package, matcher
-  module, CLI switch, or runner integration is implemented on `main`.
+- 完整的离线套件通过了 164 项测试；
+- 联网命令必须包含 `--live-approved`、`--max-queries 1..10`，使用
+  有头模式，并设置 `--min-interval >= 5`；
+- 运行器遇到 `BLOCKED` 或 `SITE_PROTECTION_CHALLENGE` 时立即停止；
+- `movies` 使用固定的 12 列 schema，并按 `task_id` upsert；
+- 确定性匹配支持规范化的精确标题、标题加年份和
+独特的主标题前缀加年份；
+- 受控 10 行工作簿通过工作簿验证器，观察到
+分布 `SUCCESS=1`、`REVIEW_REQUIRED=6` 和 `UNEXPECTED_ERROR=3`；
+- 存在较旧的 MiniMax 候选匹配器计划，但没有 LLM 包、匹配器
+模块、CLI 开关或运行器集成在 `main` 上实现。
 
-This round does not increase the live batch ceiling. It improves decision quality
-and recovery at the existing controlled scale.
+本轮不提高联网批次上限，而是在现有受控规模下改善决策质量与恢复能力。
 
-## Selected approach
+## 选定方案
 
-Use one workbook with two worksheets:
+使用一本工作簿和两个工作表：
 
-1. `movies` remains the machine-owned result table.
-2. `review_queue` is the human-review interface and audit record.
+1. `movies` 保留机器维护的结果表。
+2. `review_queue` 是人工复核界面和复核记录。
 
-This is preferred over a separate CSV because reviewers can see the result and
-candidate evidence in one artifact. It is preferred over a local web application
-because the current product is CLI- and workbook-oriented, and a web stack would
-add deployment, state synchronization, and security scope without improving the
-core decision contract.
+相比独立 CSV，复核人员可以在同一产物内查看结果和候选证据。相比本地
+Web 应用，该方案更符合当前 CLI + 工作簿的产品形态，避免额外引入部署、
+状态同步和安全边界。
 
-Review application is an explicit `apply-review` command. A normal `run` never
-silently consumes human edits.
+复核结果必须通过显式 `apply-review` 命令应用；普通 `run` 不会静默读取
+并执行人工编辑。
 
-## Workbook contract
+## 工作簿契约
 
 ### `movies`
 
-The existing worksheet name and 12 columns remain unchanged:
+现有工作表名称和12列保持不变：
 
 ```text
 task_id
@@ -69,14 +64,14 @@ error_message
 collected_at
 ```
 
-Existing callers and `verify_controlled_workbook()` therefore remain compatible.
+因此，现有调用方和 `verify_controlled_workbook()` 保持兼容。
 
 ### `review_queue`
 
-Each ambiguous task occupies one row. Candidates are stored as a bounded snapshot
-of at most five items so later site changes do not alter what the reviewer saw.
+每个歧义任务占一行，最多保存 5 个候选项快照，避免站点后续变化改变
+复核人员当时看到的证据。
 
-Machine-owned identity and evidence columns:
+机器维护的标识与证据列：
 
 ```text
 review_id
@@ -96,7 +91,7 @@ candidate_5_url
 created_at
 ```
 
-Human-editable decision columns:
+人工可编辑的决策列：
 
 ```text
 decision_type
@@ -105,7 +100,7 @@ manual_detail_url
 review_note
 ```
 
-Machine-owned application columns:
+机器维护的应用结果列：
 
 ```text
 apply_status
@@ -114,52 +109,49 @@ applied_at
 apply_error
 ```
 
-`decision_type` accepts exactly:
+`decision_type` 仅接受：
 
-- `CANDIDATE`: use one captured candidate; `selected_candidate` must be an
-  integer from 1 through `candidate_count`, and `manual_detail_url` must be
-  empty.
-- `MANUAL_URL`: use a reviewer-supplied canonical Douban movie detail URL;
-  `manual_detail_url` is required and `selected_candidate` must be empty.
-- `SKIP`: confirm that the item should remain unresolved; both selection fields
-  must be empty.
+- `CANDIDATE`：使用已捕获的候选项；`selected_candidate` 必须是
+  1 到 `candidate_count` 之间的整数，且 `manual_detail_url` 必须为空。
+- `MANUAL_URL`：使用复核人员提供的规范豆瓣电影详细信息 URL；
+`manual_detail_url` 为必填项，且 `selected_candidate` 必须为空。
+- `SKIP`：确认该项目应保持未解决状态；两个选择字段
+必须为空。
 
-`review_note` is optional and limited to a safe, bounded text length. It is an
-operator note only and is never sent to Douban or an LLM.
+`review_note` 为可选的有界文本，仅作为操作员备注，绝不会发送给豆瓣
+或 LLM。
 
-### Stable identity and replacement
+### 稳定身份和替换
 
-`review_id` is deterministically derived from the task identity and the candidate
-snapshot. A repeated normal run with the same unresolved evidence updates the
-same open review row instead of appending duplicates. If the candidate snapshot
-changes before a decision is applied, the old row is marked superseded and a new
-review row is created. Human decisions are never silently carried to materially
-different candidate evidence.
+`review_id` 根据任务标识和候选快照确定性生成。重复运行时，如果未解决
+证据相同，则更新同一未完成复核行而不追加重复项；如果应用决策前候选
+快照发生变化，则将旧行标为 `SUPERSEDED` 并创建新复核行。人工决策不会
+被静默沿用到不同的候选证据上。
 
-Successfully applied rows are immutable audit records. A later ambiguity for the
-same task receives a new `review_id`.
+成功应用的行是不可变的审计记录。后来的歧义
+同一任务收到新的 `review_id`。
 
-## Normal `run` behavior
+## 正常 `run` 行为
 
-The existing deterministic matcher keeps priority. When it cannot choose a unique
-candidate:
+现有的确定性匹配器保持优先。当它无法选择一个独特的
+候选项：
 
-1. write or update the `movies` row as `REVIEW_REQUIRED`;
-2. write the bounded candidate snapshot to `review_queue`;
-3. leave all human-editable decision fields empty for a new review;
-4. preserve an already-entered decision only when the `review_id` and candidate
-   snapshot are unchanged;
-5. continue the controlled batch under the existing interval and stopping rules.
+1. 将`movies`行写入或更新为`REVIEW_REQUIRED`；
+2. 将有界候选快照写入`review_queue`；
+3. 将所有人工可编辑的决策字段留空以进行新的复核；
+4. 仅当 `review_id` 和候选项时才保留已输入的决策
+快照不变；
+5. 在现有间隔和停止规则下继续受控批次。
 
-No detail page is opened for an unresolved candidate. Candidate snapshots contain
-only public search-result metadata already used by the matcher.
+不会为未解决的候选项打开详情页。候选快照包含
+仅匹配器已使用的公共搜索结果元数据。
 
-If there are no candidates, the result remains `NOT_FOUND` and no review row is
-created.
+如果没有候选项，则结果保留为 `NOT_FOUND`，并且不存在复核行
+创建。
 
-## `apply-review` command
+## `apply-review` 命令
 
-The command shape is:
+命令形状为：
 
 ```powershell
 python -m app.main apply-review `
@@ -171,288 +163,273 @@ python -m app.main apply-review `
   --profile-dir .\browser-profile\douban
 ```
 
-It has two separate phases.
+它有两个独立的阶段。
 
-### Phase 1: complete offline preflight
+### 第 1 阶段：完成离线预检
 
-Before constructing `BrowserSession`, creating a profile, modifying the workbook,
-or accessing the network, the command:
+在构造`BrowserSession`、创建配置文件、修改工作簿之前，
+或者访问网络，命令：
 
-1. opens and validates both worksheets;
-2. selects rows that are pending human application;
-3. validates every pending row;
-4. detects duplicated or conflicting decisions for the same `task_id`;
-5. verifies that the referenced `movies` row exists and is still eligible for
-   review;
-6. validates candidate indexes against the immutable snapshot;
-7. validates manual URLs;
-8. checks that the number of live decisions does not exceed
-   `--max-queries`;
-9. converts valid rows into an immutable in-memory execution plan.
+1. 打开并验证两个工作表；
+2. 选择等待人工应用的行；
+3. 验证每个待处理行；
+4. 检测同一 `task_id` 的重复或冲突决策；
+5. 验证引用的 `movies` 行是否存在并且仍然符合条件
+复核；
+6. 根据不可变快照验证候选索引；
+7. 验证手动 URL；
+8. 检查联网决策的数量是否不超过
+`--max-queries`;
+9. 将有效行转换为不可变的内存中执行计划。
 
-If any pending row is incomplete or invalid, the whole command returns exit code
-2. It reports all validation errors with row numbers and `review_id` values, does
-not launch a browser, and does not change either worksheet.
+如果任何待处理行不完整或无效，则整个命令返回退出代码
+2. 它报告所有带有行号和 `review_id` 值的验证错误，
+不启动浏览器，也不更改任一工作表。
 
-`SKIP` rows participate in validation but do not count as live queries.
+`SKIP` 行参与验证，但不计为联网查询。
 
-### Manual URL validation
+### 手动 URL 验证
 
-A manual URL is accepted only when:
+仅在以下情况下才接受手动 URL：
 
-- its scheme is `https`;
-- its hostname is exactly `movie.douban.com`;
-- its path is exactly `/subject/<digits>/`, allowing normalization of a missing
-  trailing slash;
-- it contains no username, password, fragment, or unexpected port;
-- it has no query parameters;
-- it does not conflict with a different decision for the same task;
-- it is not reused by another pending task in the same application batch unless
-  that reuse is explicitly the same `task_id`.
+- 其方案为`https`；
+- 其主机名正是 `movie.douban.com`；
+- 它的路径恰好是 `/subject/<digits>/`，允许对缺失进行标准化
+尾部斜杠；
+- 不包含用户名、密码、片段或意外端口；
+- 没有查询参数；
+- 与同一任务的不同决策不冲突；
+- 它不会被同一应用批次中的另一个待处理任务重用，除非
+表明重用与 `task_id` 显式相同。
 
-The preflight stores only the normalized URL in the execution plan.
+预检仅存储执行计划中的规范化 URL。
 
-### Phase 2: controlled application
+### 第 2 阶段：受控应用
 
-Only after preflight succeeds does the command validate and apply the standard
-live-run gate. It then:
+仅在预检成功后，该命令才会验证并应用标准
+现场运行门。然后它：
 
-1. marks `SKIP` rows as acknowledged without live access while leaving the
-   corresponding `movies` row at `REVIEW_REQUIRED`;
-2. resolves `CANDIDATE` rows to the selected captured URL;
-3. resolves `MANUAL_URL` rows to the normalized manual URL;
-4. fetches and parses each selected detail page with the existing Douban adapter;
-5. updates the existing `movies` row rather than appending a new result;
-6. records the final URL, application status, timestamp, and bounded error text
-   in `review_queue`;
-7. saves both worksheet updates through the existing temporary-file and atomic
-   replacement strategy.
+1. 将 `SKIP` 行标记为已确认，无需真实联网访问，同时离开
+对应`movies`行位于`REVIEW_REQUIRED`；
+2. 将 `CANDIDATE` 行解析为选定的捕获 URL；
+3. 将 `MANUAL_URL` 行解析为规范化的手动 URL；
+4、用已有的豆瓣适配器获取并解析每个选定的详情页；
+5. 更新现有的 `movies` 行而不是追加新结果；
+6. 记录最终URL、应用状态、时间戳和有界错误文本
+`review_queue` 中的
+；
+7. 通过现有临时文件和原子保存工作表更新
+替换策略。
 
-Human review is authoritative for candidate selection, so a successfully applied
-row uses a new match method `HUMAN_REVIEW`. The detail parser remains
-authoritative for extracted title, year, director, rating, canonical URL, and
-success status.
+人工复核对于候选项选择具有权威性，因此应用成功
+行使用新的匹配方法 `HUMAN_REVIEW`。细节解析器仍然存在
+权威提取标题、年份、导演、评级、规范 URL 和
+成功状态。
 
-## Failure and retry semantics
+## 失败和重试语义
 
-The command preserves current site and safety behavior:
+该命令保留当前站点和安全行为：
 
-- `BLOCKED` and `SITE_PROTECTION_CHALLENGE` update the current review attempt,
-  persist the corresponding `movies` status, and stop the remaining batch;
-- CAPTCHA, login security checks, rate limiting, and `sec.douban.com` are never
-  bypassed;
-- `NETWORK_ERROR` uses only the existing bounded retry behavior;
-- `PAGE_CHANGED` records the failure and leaves the review row retryable after an
-  offline parser repair;
-- `OUTPUT_LOCKED` returns exit code 4 and must not corrupt the previous workbook;
-- unexpected global browser failures return exit code 5;
-- validation and configuration errors return exit code 2 before live access.
+- `BLOCKED` 和 `SITE_PROTECTION_CHALLENGE` 更新当前复核尝试，
+持久化对应的`movies`状态，并停止剩余批次；
+- 验证码、登录安全检查、速率限制和 `sec.douban.com` 永远不会
+被绕过；
+- `NETWORK_ERROR` 仅使用现有的有界重试行为；
+- `PAGE_CHANGED` 记录失败并在检查行后可重试
+离线解析器修复；
+- `OUTPUT_LOCKED` 返回退出代码 4 并且不得损坏以前的工作簿；
+- 意外的全局浏览器故障返回退出代码 5；
+- 验证和配置错误在真实联网访问之前返回退出代码 2。
 
-`apply-review` never accepts `--retry-status BLOCKED` or
-`--retry-status SITE_PROTECTION_CHALLENGE`.
+`apply-review` 从不接受 `--retry-status BLOCKED` 或
+`--retry-status SITE_PROTECTION_CHALLENGE`。
 
-Re-running `apply-review` skips rows with `apply_status=APPLIED` or
-`apply_status=SKIPPED`. Failed rows remain retryable only when their decision and
-candidate snapshot are unchanged. Editing an already applied machine-owned cell
-is treated as workbook corruption, not as a request to reapply.
+重新运行 `apply-review` 会跳过带有 `apply_status=APPLIED` 的行或
+`apply_status=SKIPPED`。仅当他们的决定和
+候选快照不变。编辑已应用的机器维护的单元
+被视为工作簿损坏，而不是重新申请的请求。
 
-## Component boundaries
+## 组件边界
 
 ### `app/models.py`
 
-Add focused immutable types for candidate snapshots, review decisions, validated
-review actions, and review application states. Add `HUMAN_REVIEW` to
-`MatchMethod`.
+为候选快照添加重点不可变类型、复核决策、验证
+复核操作并复核应用程序状态。添加`HUMAN_REVIEW`到
+`MatchMethod`。
 
 ### `app/excel_store.py`
 
-Keep the existing `movies` behavior and add workbook-level operations for
-creating, reading, upserting, and atomically updating `review_queue`. Schema
-validation for the two worksheets stays at the persistence boundary.
+保留现有的 `movies` 行为并添加工作簿级操作
+创建、读取、upsert和原子更新 `review_queue`。模式
+验证停留在持久性边界。
 
 ### `app/review_service.py`
 
-Own all offline interpretation and validation of human-edited review rows. Its
-output is an immutable execution plan. It has no browser, network, logging, or
-filesystem-write responsibility.
+拥有人工编辑审阅行的所有离线解释和验证。其
+输出是不可变的执行计划。它没有浏览器、网络、日志记录或
+文件系统写入责任。
 
 ### `app/review_runner.py`
 
-Execute only validated actions. It coordinates detail fetches, result updates,
-review audit updates, interval enforcement, and stop conditions. It does not
-re-interpret workbook cells.
+仅执行经过验证的操作。它协调细节获取、结果更新、
+复核复核更新、间隔执行和停止条件。它不
+重新解释工作簿单元格。
 
 ### `app/runner.py`
 
-When deterministic matching returns no decision, create or update the candidate
-snapshot through the store. Existing deterministic success paths remain
-unchanged.
+当确定性匹配没有返回结果时，创建或更新候选
+通过商店快照。现有的确定性成功路径仍然存在
+不变。
 
 ### `app/main.py`
 
-Add `apply-review`, perform offline workbook preflight before browser
-construction, enforce the same live authorization gate, and map known failures to
-the existing exit-code scheme.
+添加`apply-review`，在浏览器之前执行离线工作簿预检
+构造，强制执行相同的实时授权门，并将已知故障映射到
+现有的退出代码方案。
 
-## Data integrity and auditability
+## 数据完整性和可审计性
 
-- `movies` stays authoritative for the latest task outcome.
-- `review_queue` stays authoritative for what evidence the human reviewed and
-  what decision was applied.
-- Machine-owned review columns are protected by validation rather than relying
-  on Excel worksheet protection.
-- A single atomic workbook replacement commits the paired `movies` and
-  `review_queue` changes.
-- Candidate snapshots and notes are stored only in the ignored runtime workbook,
-  never in Git.
-- Logs contain `review_id`, `task_id`, stage, status, and elapsed time, but no
-  Cookie, browser profile, full HTML, or sensitive request metadata.
+- `movies` 是最新任务结果的权威来源。
+- `review_queue` 是人工查看过的证据和最终应用决策的权威审计记录。
+- 通过严格校验保护机器维护列，不依赖 Excel 工作表保护功能。
+- 每次以单次原子工作簿替换同时提交 `movies` 和 `review_queue` 变更。
+- 候选快照和备注仅存储在已忽略的运行时工作簿中，不进入 Git。
+- 日志包含 `review_id`、`task_id`、阶段、状态和耗时，但不包含 Cookie、
+  浏览器 profile、完整 HTML 或敏感请求元数据。
 
-## Forward compatibility: automated batches and recovery
+## 前向兼容性：自动批量和恢复
 
-The next planned capability after the human-review loop is automated batch
-execution and recovery. This design must therefore leave stable seams for a
-future batch coordinator without turning the current Douban workflow into an
-unattended crawler.
+人工复核闭环之后的下一阶段是自动批次执行与恢复。本设计必须为未来的
+批次协调器保留稳定接口，同时不能把当前豆瓣流程变成无人值守爬虫。
 
-The current implementation plan will preserve the following boundaries:
+目前的实施计划将保留以下边界：
 
-- review validation produces an immutable execution plan with stable action
-  identities;
-- each applied action has an explicit lifecycle state rather than relying only
-  on row position;
-- persistence can checkpoint one completed action at a time through atomic
-  workbook replacement;
-- runners accept an already validated collection of actions and return a
-  structured summary of processed, skipped, retryable, and stopped work;
-- retry eligibility is derived from recorded status and an explicit policy;
-- repeated invocation is safe and skips terminal actions;
-- stop reasons distinguish operator-correctable input, transient technical
-  failure, output locking, page change, hard blocking, and site-protection
-  challenge;
-- live authorization remains a CLI boundary and is not embedded in a saved plan,
-  workbook, scheduled task, or reusable credential.
+- 复核验证生成带稳定操作标识的不可变执行计划；
+- 每个应用操作都有明确生命周期状态，不依赖工作表行位置；
+- 持久化层可通过原子工作簿替换逐项记录完成检查点；
+- 运行器接收已验证操作集合，并返回已处理、已跳过、可重试和已停止任务
+  的结构化摘要；
+- 重试资格源自记录的状态和明确的策略；
+- 重复调用是安全的并跳过终端操作；
+- 停止原因区分操作员可修正输入、瞬态技术故障、输出锁定、页面变化、
+  硬阻断和站点保护挑战；
+- 真实联网授权仍是 CLI 边界，不得写入已保存计划、工作簿、计划任务或
+  可复用凭据。
 
-For Douban, “automated batch” means an operator starts each controlled invocation
-with `--live-approved`, `--max-queries N` where `1 <= N <= 10`, headed mode, and
-an interval of at least five seconds. Within that invocation the program may
-checkpoint progress, skip completed actions, and resume retryable actions.
-It must not automatically launch the next live batch, schedule a later retry,
-wait through a site-protection window, or reuse prior approval.
+对于豆瓣，“自动批次”仅表示操作员以 `--live-approved`、
+`--max-queries N`（`1 <= N <= 10`）、有头模式和至少 5 秒间隔启动一次
+受控调用。在单次调用内部，程序可以记录进度检查点、跳过已完成操作并
+恢复可重试操作；不得自动启动下一联网批次、调度稍后重试、等待站点保护
+窗口或复用先前授权。
 
-A later generic batch layer may provide:
+稍后的通用批处理层可以提供：
 
-- a durable `batch_id` and run manifest;
-- `plan`, `run`, `status`, and `resume` commands;
-- per-action attempt history and aggregate progress;
-- dry-run validation and estimated live-query counts;
-- explicit retry policies for transient statuses;
-- machine-readable JSON summaries alongside the human workbook;
-- pluggable execution backends for data sources whose authorization permits
-  unattended operation.
+- 持久的 `batch_id` 和运行清单；
+- `plan`、`run`、`status` 和 `resume` 命令；
+- 每个操作的尝试历史记录和聚合进度；
+- 空运行验证和估计的联网查询计数；
+- 针对短暂状态的显式重试策略；
+- 机器可读的 JSON 摘要以及人类工作簿；
+- 面向明确允许无人值守操作的数据源提供可插拔执行后端。
 
-Those capabilities are not implemented in this round. The review workflow only
-establishes the state model and idempotent execution contract they will consume.
+这些能力不在本轮实现范围内；本轮复核流程只建立其未来可复用的状态模型
+与幂等执行契约。
 
-## Testing strategy
+## 测试策略
 
-Implementation follows test-driven development.
+实施遵循测试驱动开发。
 
-### Pure validation tests
+### 纯验证测试
 
-Cover:
+覆盖：
 
-- every legal decision type;
-- blank and unknown decision values;
-- candidate indexes that are non-numeric, zero, negative, or beyond the snapshot;
-- mutually conflicting candidate and manual URL fields;
-- accepted canonical URL and normalized missing trailing slash;
-- rejected scheme, host, port, credentials, query, fragment, and path;
-- duplicate task decisions and duplicate manual URLs;
-- missing or stale `movies` task references;
-- mixed valid and invalid rows proving whole-batch rejection;
-- live-decision counting excluding `SKIP`;
-- immutable execution-plan output.
+- 每种合法决策类型；
+- 空白且未知的决策值；
+- 非数字、零、负数或超出快照的候选索引；
+- 候选和手动 URL 字段相互冲突；
+- 接受规范 URL 和标准化缺失尾部斜杠；
+- 拒绝的方案、主机、端口、凭据、查询、片段和路径；
+- 重复的任务决策和重复的手动 URL；
+- `movies` 任务引用丢失或过时；
+- 混合有效和无效行证明整批拒绝；
+- 联网决策计数，不包括 `SKIP`；
+- 不可变的执行计划输出。
 
-### Workbook tests
+### 工作簿测试
 
-Cover:
+覆盖：
 
-- creation of both schemas;
-- preservation of the original 12-column `movies` contract;
-- candidate snapshot upsert without duplicate open rows;
-- superseding changed snapshots;
-- preservation of human fields for unchanged snapshots;
-- paired worksheet atomic save;
-- workbook locking;
-- corrupted machine-owned fields;
-- idempotent reapplication of completed rows.
+- 创建两个 schema；
+- 保存原始12列`movies`契约；
+- 候选快照 upsert 且不产生重复未完成行；
+- 取代更改的快照；
+- 保留未变化快照中的人工字段；
+- 双工作表原子保存；
+- 工作簿锁定；
+- 损坏的机器维护的字​​段；
+- 已完成行的幂等重新应用。
 
-### Runner and CLI tests
+### 运行器和 CLI 测试
 
-Cover:
+覆盖：
 
-- ambiguous normal runs create review rows;
-- deterministic matches do not create review rows;
-- `NOT_FOUND` does not create review rows;
-- preflight failure never constructs a browser or changes a workbook;
-- missing live authorization, excess query count, headless mode, and short
-  interval fail before browser construction;
-- candidate and manual URL actions fetch the intended detail page;
-- `SKIP` performs no network access;
-- successful application updates both worksheets and uses `HUMAN_REVIEW`;
-- site protection stops the remaining application batch;
-- network, page-change, locked-output, and unexpected-error mappings;
-- repeated commands skip already applied rows.
+- 不明确的正常运行会创建复核行；
+- 确定性匹配不会创建复核行；
+- `NOT_FOUND` 不创建复核行；
+- 预检失败永远不会构建浏览器或更改工作簿；
+- 缺少联网授权、查询数超限、使用无头模式或间隔过短时，均在浏览器构建
+  前失败；
+- 候选和手动 URL 操作获取预期的详情页；
+- `SKIP`不执行网络访问；
+- 成功的应用流程更新两个工作表并使用 `HUMAN_REVIEW`；
+- 站点保护停止剩余的应用批次；
+- 网络、页面更改、锁定输出和意外错误映射；
+- 重复命令会跳过已应用的行。
 
-The full offline suite and portable core coverage gate must remain green. Offline
-CI must not invoke `apply-review` with live authorization or access Douban.
+完整离线测试套件和可移植核心覆盖率门禁必须继续通过。离线 CI 不得调用
+带联网授权的 `apply-review`，也不得访问豆瓣。
 
-## Documentation changes
+## 文档更改
 
-The implementation round will update the README with:
+实施阶段将更新 README：
 
-- the two-worksheet workflow;
-- editable versus machine-owned columns;
-- a copyable `apply-review` command;
-- validation-error examples;
-- retry and stop rules;
-- a reminder to close Excel before applying;
-- the prohibition on committing workbooks, profiles, HTML, screenshots, logs,
-  and other runtime evidence.
+- 两个工作表流程；
+- 可编辑与机器维护的列；
+- 可复制的 `apply-review` 命令；
+- 验证错误示例；
+- 重试和停止规则；
+- 应用前关闭 Excel 的提醒；
+- 禁止提交工作簿、配置文件、HTML、屏幕截图、日志、
+和其他运行时证据。
 
-## Non-goals
+## 非目标
 
-This round does not:
+本轮不：
 
-- build a web review interface;
-- automate login, CAPTCHA solving, or site-protection challenges;
-- increase the ten-query live ceiling;
-- schedule unattended live jobs or automatically chain Douban batches;
-- add a second site adapter;
-- allow arbitrary non-Douban URLs;
-- change the 12-column `movies` schema;
-- automatically apply decisions during a normal `run`;
-- implement MiniMax in the same implementation plan.
+- 构建网页复核界面；
+- 自动登录、验证码解决或站点保护挑战；
+- 提高 10 条查询的联网上限；
+- 安排无人值守联网作业或自动串联豆瓣批次；
+- 添加第二个站点适配器；
+- 允许任意非豆瓣URL；
+- 更改 12 列 `movies` 架构；
+- 在正常 `run` 期间自动应用决策；
+- 在同一实施计划中实施 MiniMax。
 
-MiniMax remains a later, independently optional enhancement. The human-review
-contract should be completed and measured first; an LLM may later propose a
-decision, but it must not bypass the same validation or live-application gates.
+MiniMax 仍是后续独立的可选增强。应先完成并度量人工复核契约；LLM
+以后可以提出决策建议，但不得绕过相同的校验和联网应用门禁。
 
-## Acceptance criteria
+## 验收标准
 
-- An ambiguous task produces one open `review_queue` row with at most five
-  candidate snapshots.
-- A reviewer can select a captured candidate, enter a valid manual Douban detail
-  URL, or explicitly skip the task.
-- One invalid pending row rejects the complete batch before browser construction
-  and without workbook mutation.
-- A valid `apply-review` batch obeys all existing live-run limits and stopping
-  rules.
-- Successful application updates the original `movies` row and records an
-  auditable review outcome in the same atomic workbook save.
-- Re-running the command does not reapply completed decisions.
-- The original workbook verifier remains compatible with the `movies` worksheet.
-- All offline tests and release gates remain network-free and pass.
-- No runtime workbook, browser profile, diagnostic artifact, Cookie, or secret is
-  added to Git.
+- 一个歧义任务生成一条未完成 `review_queue` 记录，最多包含 5 个候选快照。
+- 复核人员可以选择捕获的候选项，输入有效的手动豆瓣详细信息
+URL，或明确跳过任务。
+- 任一无效待处理行都会在浏览器构建前拒绝整批执行，且工作簿零修改。
+- 有效的 `apply-review` 批次遵守所有现有的真实联网运行限制和停止
+规则。
+- 成功应用后更新原始 `movies` 行，并在同一次原子工作簿保存中记录可审计
+  的复核结果。
+- 重新运行该命令不会重新应用已完成的决策。
+- 原始工作簿验证器仍然与 `movies` 工作表兼容。
+- 所有离线测试和发布门都保持无网络状态并通过。
+- 不向 Git 添加运行时工作簿、浏览器 profile、诊断产物、Cookie 或密钥。
