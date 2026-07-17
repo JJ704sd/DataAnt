@@ -9,7 +9,7 @@ from typing import Any
 from app.diagnostics import capture_failure, redact
 from app.matcher import choose_match
 from app.models import MovieResult, RunSummary, Status, Task
-from app.sites.douban_movie import (
+from app.site_errors import (
     BlockedError,
     NetworkError,
     PageChangedError,

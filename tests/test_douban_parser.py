@@ -4,13 +4,13 @@ import pytest
 
 from app.models import Candidate, MatchMethod, Status, Task
 from app.sites import douban_movie
-from app.sites.douban_movie import (
+from app.site_errors import (
     BlockedError,
-    DoubanMovieAdapter,
     NetworkError,
     PageChangedError,
     SiteProtectionChallenge,
 )
+from app.sites.douban_movie import DoubanMovieAdapter
 from DrissionPage.errors import ContextLostError, PageDisconnectedError
 
 

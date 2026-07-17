@@ -161,30 +161,12 @@ def _parse_legacy_subject_links(html: str) -> list[Candidate]:
     return candidates
 
 
-class BlockedError(RuntimeError):
-    pass
-
-
-class PageChangedError(RuntimeError):
-    pass
-
-
-class NetworkError(RuntimeError):
-    pass
-
-
-class SiteProtectionChallenge(RuntimeError):
-    """Raised when Douban's JavaScript proof-of-work challenge is detected.
-
-    Douban serves a SHA-512 nonce-mining challenge (typically under
-    ``sec.douban.com``) when site protection decides the current request
-    pattern is suspect. The browser can solve it automatically in 1-3
-    seconds, but per the project's live-run rules we never automate that
-    bypass: we stop the batch and surface the status so the operator can
-    decide whether to wait for the IP frequency window to expire and
-    retry. This is distinct from ``BlockedError`` because a challenge is
-    transient and a blocked page is not.
-    """
+from app.site_errors import (
+    BlockedError,
+    NetworkError,
+    PageChangedError,
+    SiteProtectionChallenge,
+)
 
 
 class DoubanMovieAdapter:

@@ -16,7 +16,7 @@ from app.models import (
     Task,
 )
 from app.runner import DEFAULT_RETRY, Runner
-from app.sites.douban_movie import (
+from app.site_errors import (
     BlockedError,
     NetworkError,
     PageChangedError,
