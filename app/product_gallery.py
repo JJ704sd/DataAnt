@@ -389,6 +389,10 @@ header.page-header .source {
     font-size: 14px;
     word-break: break-word;
 }
+.evidence-panel .row .val.timestamp {
+    word-break: normal;
+    overflow-wrap: normal;
+}
 .evidence-panel .row .val.muted { color: var(--muted); }
 .evidence-panel pre {
     background: var(--panel-2);
@@ -541,7 +545,8 @@ header.page-header .source {
         if (product.status === "PARTIAL" && missing.length) {
             return "Missing " + missing.join(", ");
         }
-        return shortError(product.error_message);
+        var error = shortError(product.error_message);
+        return error || "Failure reason unavailable";
     }
 
     function summarizeQuality(items) {
@@ -571,6 +576,7 @@ header.page-header .source {
     }
 
     function formatMissingSummary(summary) {
+        if (!summary.total) return "No records";
         var parts = [];
         for (var i = 0; i < QUALITY_FIELDS.length; i++) {
             var label = QUALITY_FIELDS[i].label;
@@ -578,7 +584,13 @@ header.page-header .source {
                 parts.push("Missing " + label + ": " + summary.missing[label]);
             }
         }
-        return parts.length ? parts.join(" · ") : "Fields complete";
+        if (parts.length) return parts.join(" · ");
+        if (summary.failed) {
+            return summary.success
+                ? "Fields complete for evaluated records"
+                : "Not evaluated";
+        }
+        return "Fields complete";
     }
 
     function formatTimestamp(value) {
@@ -791,6 +803,15 @@ header.page-header .source {
         }
     }
 
+    function safeSourceUrl(value) {
+        if (isBlank(value)) return "";
+        var text = String(value).trim();
+        if (!/^https:\/\/web-scraping\.dev\/product\/\d+\/?$/.test(text)) {
+            return "";
+        }
+        return text;
+    }
+
     function fieldRow(label, value, options) {
         options = options || {};
         var content;
@@ -800,10 +821,17 @@ header.page-header .source {
         } else if (options.mono) {
             content = "<pre>" + escapeHtml(value) + "</pre>";
         } else if (options.link) {
-            content =
-                '<a class="val' + valueClass + '" href="' + escapeHtml(value) +
-                '" target="_blank" rel="noopener noreferrer">' +
-                escapeHtml(value) + "</a>";
+            var safeLink = safeSourceUrl(value);
+            if (safeLink) {
+                content =
+                    '<a class="val' + valueClass + '" href="' + escapeHtml(safeLink) +
+                    '" target="_blank" rel="noopener noreferrer">' +
+                    escapeHtml(safeLink) + "</a>";
+            } else {
+                content =
+                    '<span class="val' + valueClass + '">' +
+                    escapeHtml(value) + "</span>";
+            }
         } else {
             content =
                 '<span class="val' + valueClass + '">' +
@@ -1000,7 +1028,6 @@ def render_gallery(collection: ProductCollection) -> str:
     generated_label = _format_timestamp(collection.generated_at)
     return (
         _TEMPLATE
-        .replace("__EMBEDDED_DATA__", embedded)
         .replace("__TOTAL__", str(summary.total))
         .replace("__SUCCESS__", str(summary.success))
         .replace("__PARTIAL__", str(summary.partial))
@@ -1009,6 +1036,7 @@ def render_gallery(collection: ProductCollection) -> str:
         .replace("__QUALITY_TOTAL__", str(summary.total))
         .replace("__QUALITY_MISSING__", html.escape(quality_missing))
         .replace("__GENERATED__", html.escape(generated_label))
+        .replace("__EMBEDDED_DATA__", embedded)
     )
 
 

@@ -155,3 +155,73 @@ def test_gallery_recomputes_summary_for_visible_snapshot() -> None:
     assert "Showing \" + current.total + \" of \" + products.length" in page
     assert "categoryValue(product) !== state.category" in page
     assert "formatTimestamp(product.collected_at)" in page
+
+
+def test_gallery_preserves_placeholder_like_product_values() -> None:
+    dangerous = replace(
+        ProductRecord.success_fixture("1"),
+        name="__TOTAL__",
+    )
+    collection = ProductCollection.from_records(
+        [dangerous],
+        generated_at="2026-07-16T20:00:00+08:00",
+        blocked=False,
+    )
+
+    page = render_gallery(collection)
+
+    assert '"name": "__TOTAL__"' in page
+
+
+def test_gallery_validates_source_links_before_creating_evidence_href() -> None:
+    dangerous = replace(
+        ProductRecord.success_fixture("1"),
+        product_url="javascript:alert(1)",
+    )
+    collection = ProductCollection.from_records(
+        [dangerous],
+        generated_at="2026-07-16T20:00:00+08:00",
+        blocked=False,
+    )
+
+    page = render_gallery(collection)
+
+    assert '"product_url": "javascript:alert(1)"' in page
+    assert "function safeSourceUrl(value)" in page
+    assert "var safeLink = safeSourceUrl(value);" in page
+
+
+def test_gallery_falls_back_when_a_failed_record_has_no_reason() -> None:
+    failed = ProductRecord.failure(
+        ProductListing(
+            "5",
+            "https://web-scraping.dev/product/5",
+            "",
+        ),
+        ProductStatus.PAGE_CHANGED,
+        "",
+    )
+    collection = ProductCollection.from_records(
+        [failed],
+        generated_at="2026-07-16T20:00:00+08:00",
+        blocked=False,
+    )
+
+    page = render_gallery(collection)
+
+    assert '"error_message": ""' in page
+    assert 'return error || "Failure reason unavailable";' in page
+
+
+def test_gallery_keeps_failure_aware_quality_summary_copy() -> None:
+    page = quality_gallery()
+
+    assert 'if (!summary.total) return "No records";' in page
+    assert '"Fields complete for evaluated records"' in page
+    assert '"Not evaluated"' in page
+
+
+def test_gallery_preserves_timestamp_words_in_evidence_rows() -> None:
+    page = quality_gallery()
+
+    assert ".evidence-panel .row .val.timestamp" in page
