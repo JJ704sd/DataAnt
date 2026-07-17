@@ -163,3 +163,18 @@ def test_core_13_uses_workbook_only_release_evidence() -> None:
     assert "verify_controlled_workbook(workbook)" in spec
     assert "controlled-demo-evidence.json" not in spec
     assert "approval_reference" not in spec
+
+
+def test_readme_documents_product_collection_gate_and_gallery() -> None:
+    readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+    for required in (
+        "collect-products",
+        "--max-products",
+        "--min-interval 2",
+        "products.xlsx",
+        "products.json",
+        "gallery.html",
+        "web-scraping.dev",
+        "/robots-disallowed",
+    ):
+        assert required in readme

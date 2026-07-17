@@ -210,9 +210,138 @@ python -m app.main run --input .\inputs\queries.example.csv --output .\outputs\d
 
 ---
 
-## 8. CI 与 Release Readiness
+## 8. 第二站点：web-scraping.dev 商品采集与离线画廊
 
-### 8.1 CI 是什么、不是什么
+本仓库在豆瓣电影 Demo 之外，**独立**接入第二个明确用于网页抓取练习的目标网站 `web-scraping.dev`。`web-scraping.dev` 自述为面向网页抓取开发者的安全、合法的练习平台，其 `robots.txt` 声明 2 秒抓取间隔并显式禁止 `/robots-disallowed` 路径。本节只描述受控受权的商品采集与本地画廊验收，不复用豆瓣的 12 列电影契约、不复用豆瓣适配器、也不复用电影 Excel schema。
+
+### 8.1 站点定位与访问边界
+
+**为什么是第二个站点**
+
+- 提供服务端分页的商品列表（`/products`）和稳定 ID 的商品详情（`/product/<id>`），适合作为新增站点适配器的最小目标。
+- 与豆瓣电影契约完全独立：商品价格、分类、品牌、变体等信息不会被塞进 12 列电影工作簿。
+- 离线 fixture 友好：列表/详情/阻断等场景可被完全本地化为 HTML 快照，CI 永远不连真实站点。
+
+**允许访问的路径**
+
+- `https://web-scraping.dev/products` 列表首页；
+- `/products` 服务端分页产生的合法下一页 URL；
+- 由列表页发现、经 URL 规范化校验后的 `https://web-scraping.dev/product/<id>` 详情页。
+
+**禁止访问（命中立即停止）**
+
+- `/robots-disallowed` 及其下属任何路径；
+- 登录 / iframe 登录 / 凭证检查页面；
+- 购物车、购买与评论 Load More 等交互接口；
+- GraphQL、CSRF、文件下载、Antibot Challenge；
+- 任意站外 URL（含被重定向后的 `sec.douban.com` 之类）。
+
+### 8.2 受控采集命令（可复制）
+
+```powershell
+python -m app.main collect-products `
+  --site web-scraping.dev `
+  --output-dir .\outputs\web-scraping-dev-demo `
+  --live-approved `
+  --max-products 10 `
+  --headed `
+  --min-interval 2 `
+  --profile-dir .\browser-profile\web-scraping-dev
+```
+
+要点：
+
+- 必须在浏览器启动前显式传入 `--live-approved`，否则 `app.main` 直接返回退出码 2；
+- `--max-products` 取值 `[1, 10]`，命令在启浏览器前完成强校验；
+- `--min-interval 2` 是平台声明的下限，命令禁止下调到 2 秒以下；
+- `--profile-dir` 必须落在仓库 `browser-profile/` 内（`browser-profile/web-scraping-dev`），禁止接管日常浏览器 profile；
+- `--output-dir` 必须落在仓库 `outputs/` 内（`outputs/web-scraping-dev-demo`），禁止写到仓库外；
+- 受控验收必须至少跨两个 `/products` 分页，证明分页发现 + 去重 + 详情解析共同工作。
+
+### 8.3 输出三件套
+
+`--output-dir` 指定目录内同时生成三个产物，**必须**来自同一次不可变的 `ProductCollection`：
+
+| 产物 | 角色 | 用途 |
+| ---- | ---- | ---- |
+| `products.xlsx` | 结构化主表 | 12 列固定顺序、按 `product_id` upsert；列顺序与商品领域模型一致，**不**复用豆瓣电影 12 列。 |
+| `products.json` | 机器可读快照 | 含 `schema_version` / `source_site` / `generated_at` / `summary` / `products`；金额为 JSON number，时间为带时区的 ISO 8601。 |
+| `gallery.html` | 静态可视化画廊 | 商品卡片 + 采集证据侧栏；嵌入本地数据，离线双击即可打开。 |
+
+输出被 Excel 占用时返回 `OUTPUT_LOCKED` 语义（退出码 4），不覆盖也不损坏旧文件。任何单个输出器失败都不会产生彼此不一致的产物。
+
+### 8.4 打开静态画廊（本地，无网络）
+
+```powershell
+# 推荐：用默认浏览器直接打开
+Start-Process .\outputs\web-scraping-dev-demo\gallery.html
+
+# 或在文件资源管理器双击
+explorer .\outputs\web-scraping-dev-demo\gallery.html
+```
+
+打开前请确认：
+
+- 当前网络已**断开**，或 DevTools Network 面板已开启；
+- 页面加载完成后 Network 面板**无任何自动请求**到 `web-scraping.dev`、CDN 或外部域名；
+- 商品卡片封面始终由内置 CSS/SVG 按分类和名称**本地**生成，不下载任何远程图片。
+
+### 8.5 画廊交互能力
+
+`gallery.html` 在纯 HTML + CSS + 原生 JavaScript 下提供以下能力，**不**依赖任何 CDN、字体或前端框架：
+
+- 按商品名称模糊搜索；
+- 按 `category` 分类下拉筛选；
+- 按 `status` 采集状态下拉筛选；
+- 按 `current_price` 升序 / 降序切换；
+- 点击任意商品卡片 → 右侧/下方证据侧栏更新，展示完整名称、描述、价格、原价、币种、品牌、变体数、`product_id`、采集时间、规范来源 URL、状态徽标与失败/部分成功原因；
+- 窄屏下卡片网格自动折叠为单列，侧栏始终可读；
+- 失败商品仍以卡片形式展示，并在侧栏明确写出 `error_message`。
+
+### 8.6 状态与故障处置
+
+| 状态 | 含义 | 推荐处置 | CLI 退出码 |
+| ---- | ---- | -------- | ---------- |
+| `SUCCESS` | 必填字段全部解析成功 | 无 | 0 |
+| `PARTIAL` | 商品身份与价格成立，可选展示字段缺失 | 接受结果，记录原因 | 0 |
+| `PAGE_CHANGED` | 列表或详情关键结构不符合契约 | 先修适配器 + 离线 parser，跑通后再受控重跑 | 0 |
+| `NETWORK_ERROR` | 有限重试（2s / 5s 退避）后仍无法访问 | 下次 run 兜底 | 0 |
+| `BLOCKED` | 429、阻断页或明确访问限制 | **立即停止**，不绕过 | 3 |
+| `UNEXPECTED_ERROR` | 未归类异常 | 查看诊断，定位根因后再跑 | 5 |
+
+补充：
+
+- `PARTIAL` **不**用于掩盖必填字段缺失（缺 ID / 缺名称 / 缺当前价 / 页面已不是详情形态）—— 这些情况必须落到 `PAGE_CHANGED`。
+- 失败记录仍进入 `products.xlsx` / `products.json` / `gallery.html`，保留 `product_id`、来源 URL、状态、错误信息与采集时间，**不**为缺失字段编造默认值。
+- 任何状态都不修改豆瓣电影 12 列 schema、不复用 `movies` 工作表。
+
+### 8.7 立即停止条件
+
+下列任意一种命中，适配器立即抛错、运行器立即终止本批，**不**做代理、验证码识别、Cookie 注入、降速绕过等任何形式的“再试一次”：
+
+- HTTP 429；
+- 明确阻断页（站方声明的 block / challenge 页面）；
+- 重定向到目标站阻断或挑战页；
+- 登录、安全检查或凭证页面；
+- 跳转到 `web-scraping.dev` 之外域名；
+- 命中 `/robots-disallowed` 等 robots 禁止路径；
+- 连续多页表明适配器已失效。
+
+### 8.8 CI 与离线验收
+
+- CI（`.github/workflows/core-offline.yml`）**只**做离线 fixture 测试：跑全量 `pytest`、跑 `scripts.verify_core` 覆盖率门禁、跑 `pip check`、跑 `git diff --check`。**不**启动浏览器、**不**访问 `web-scraping.dev`、**不**生成或上传 `products.xlsx` / `products.json` / `gallery.html`。
+- 验收离线产物时直接跑 `python -m pytest tests/test_product_output_bundle.py tests/test_product_gallery.py -q`，使用 fixture 在临时目录构造 `products.xlsx` / `products.json` / `gallery.html`；不要把临时文件复制到 Git 跟踪目录。
+- 人工受控验收必须显式传 `--live-approved --max-products N`，有头浏览器运行、至少跨两个列表分页、间隔 `>= 2` 秒；至少要核对三个产物的商品数与 `product_id` 完全一致。
+
+### 8.9 永不提交
+
+`outputs/`、`browser-profile/`、`artifacts/`、日志、截图、HTML 证据、API Key、Cookie、请求头、用户身份相关字段一律**不**进 Git。`.gitignore` 已托管上述路径，本节新增的 `outputs/web-scraping-dev-demo/`、`browser-profile/web-scraping-dev/` 也只保留 `.gitkeep` 占位。提交前 `git diff --name-only` 应只看到本任务批准的 `README.md`、`tests/test_project_config.py`（必要时加上 `pyproject.toml`）。
+
+---
+
+## 9. CI 与 Release Readiness
+
+### 9.1 CI 是什么、不是什么
 
 `.github/workflows/core-offline.yml` 是**离线核心 release gate**，故意做得很窄：
 
@@ -229,7 +358,7 @@ python -m app.main run --input .\inputs\queries.example.csv --output .\outputs\d
 
 > **一句话：CI 绿 ≠ release 绿。** CI 只证明"在隔离环境里离线契约没破"，它无法证明"在 release host 上能起浏览器、能在真实豆瓣上工作、且本次 run 已被合规批准"。
 
-### 8.2 Release Readiness 还需要哪些证据
+### 9.2 Release Readiness 还需要哪些证据
 
 一个 release 真正可发，**除 CI 绿以外**还至少需要：
 
@@ -240,18 +369,18 @@ python -m app.main run --input .\inputs\queries.example.csv --output .\outputs\d
    - 本任务不再要求独立的受控 evidence 文件，也不再读取任何外部审批字段 —— 那个责任现在落到 CLI 上的 `--live-approved` 开关 + 1–10 行 `--max-queries` 上限。
 3. **CLI 授权记录可追溯**：本次 run 的命令行必须能复现出来（`--live-approved --max-queries N --headed --min-interval 5`），run 日志里要能引用到。
 
-### 8.3 缺证据时的处置
+### 9.3 缺证据时的处置
 
 - 缺本地 browser smoke → **BLOCKED**，不发布。
 - 缺受控 workbook / `verify_controlled_workbook` 不通过 → **BLOCKED**，不发布。
 - 缺 CLI 授权的运行日志（`--live-approved` 与 `--max-queries`）→ **BLOCKED**，**不允许**通过"跑一次真实豆瓣补一下"绕过 — 那等于把 CI 之外的 live 访问偷偷放进来，违反本仓库零网络、零 API Key 的红线。
 - BLOCKED 必须显式记录在交付回报里（"因 X 证据缺失，release 仍处 BLOCKED"），而不是悄悄标"完成"。
 
-### 8.4 MiniMax 集成延期
+### 9.4 MiniMax 集成延期
 
 `MINIMAX_API_KEY` 继续延期接入，本轮 CI 与 release 流程**不读**这个变量、不调用 `api.minimax.com`，LLM 路径在 CI 里被彻底切断。等专门的 MiniMax 接入任务上线时，再把 secret scan pattern 同步扩展并复用同一份 `scripts.verify_core` 阈值。
 
-### 8.5 Release Readiness 12 步门禁
+### 9.5 Release Readiness 12 步门禁
 
 把 release 从"CI 绿"推进到"READY_TO_PUSH"需要 12 步可逐条复制的 PowerShell 门禁：
 
