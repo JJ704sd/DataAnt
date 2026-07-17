@@ -19,7 +19,7 @@ from app.product_models import (
     ProductRecord,
     ProductStatus,
 )
-from app.product_runner import ProductRunner
+from app.product_runner import ProductRunMetrics, ProductRunner
 from app.site_errors import BlockedError, NetworkError, PageChangedError
 from app.sites.web_scraping_dev import WebScrapingDevAdapter
 
@@ -398,3 +398,28 @@ def test_page_changed_record_captures_html_diagnostic(tmp_path) -> None:
 
     snapshot = tmp_path / "product-1.html"
     assert snapshot.read_text(encoding="utf-8") == DiagnosticTab.html
+
+
+# --------------------------------------------------------------------------- #
+# Step 5: optional ProductRunMetrics counter / timer
+# --------------------------------------------------------------------------- #
+
+
+def test_runner_metrics_count_paced_operations_and_records() -> None:
+    adapter = FakeAdapter.single_page("1")
+    metrics = ProductRunMetrics()
+
+    collection = ProductRunner(
+        adapter,
+        object(),
+        max_products=1,
+        min_interval_seconds=0,
+        metrics=metrics,
+    ).run()
+
+    assert collection.summary.total == 1
+    assert metrics.paced_operations == 2
+    assert metrics.network_retry_count == 0
+    assert metrics.detail_records == 1
+    assert metrics.discovery_seconds >= 0.0
+    assert metrics.detail_seconds >= 0.0

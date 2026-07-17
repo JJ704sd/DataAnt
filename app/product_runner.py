@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -60,6 +61,24 @@ _CAPTURE_STATUSES: frozenset[ProductStatus] = frozenset(
 )
 
 
+@dataclass(slots=True)
+class ProductRunMetrics:
+    """Optional local counter / timer aggregate for a single :class:`ProductRunner` run.
+
+    Designed to be allocated by the CLI before construction and
+    threaded through :class:`ProductRunner` so the runner can fill in
+    counters without changing its return value. The fields are kept
+    integer / float only so the same object can be JSON-encoded
+    without any further transformation.
+    """
+
+    paced_operations: int = 0
+    network_retry_count: int = 0
+    detail_records: int = 0
+    discovery_seconds: float = 0.0
+    detail_seconds: float = 0.0
+
+
 class ProductRunner:
     def __init__(
         self,
@@ -70,6 +89,7 @@ class ProductRunner:
         min_interval_seconds: float,
         logger: logging.Logger | None = None,
         artifacts_dir: Path | None = None,
+        metrics: ProductRunMetrics | None = None,
     ) -> None:
         if max_products <= 0:
             raise ValueError(
@@ -86,22 +106,33 @@ class ProductRunner:
         self.min_interval_seconds = float(min_interval_seconds)
         self.logger = logger
         self.artifacts_dir = artifacts_dir
+        self.metrics = metrics
 
     # -- Public API ---------------------------------------------------- #
 
     def run(self) -> ProductCollection:
         """Discover, fetch, stop safely, and return one immutable collection."""
+        discovery_started = time.perf_counter()
         listings, discovery_blocked = self._discover()
+        if self.metrics is not None:
+            self.metrics.discovery_seconds = (
+                time.perf_counter() - discovery_started
+            )
         records: list[ProductRecord] = []
         detail_blocked = False
+        detail_started = time.perf_counter()
         for listing in listings:
             if len(records) >= self.max_products:
                 break
             record, stop = self._fetch(listing)
             records.append(record)
+            if self.metrics is not None:
+                self.metrics.detail_records += 1
             if stop:
                 detail_blocked = True
                 break
+        if self.metrics is not None:
+            self.metrics.detail_seconds = time.perf_counter() - detail_started
         return ProductCollection.from_records(
             records,
             generated_at=datetime.now()
@@ -317,6 +348,8 @@ class ProductRunner:
             try:
                 return operation()
             except NetworkError as exc:
+                if self.metrics is not None:
+                    self.metrics.network_retry_count += 1
                 last_error = exc
         assert last_error is not None
         raise last_error
@@ -330,6 +363,8 @@ class ProductRunner:
         back-to-back visits never go faster than the configured pace.
         """
         started = time.monotonic()
+        if self.metrics is not None:
+            self.metrics.paced_operations += 1
         try:
             return self._network_operation(operation)
         finally:

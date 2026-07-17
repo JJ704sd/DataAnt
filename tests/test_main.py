@@ -450,7 +450,9 @@ class _FakeProductRunner:
     Mirrors the production ``ProductRunner`` keyword-only signature so the
     CLI passes arguments the same way. ``next_collection`` controls the
     return value of ``run()`` so individual tests can flip the
-    ``blocked`` flag without re-instantiating the fake.
+    ``blocked`` flag without re-instantiating the fake. ``metrics`` is
+    stored so tests can assert the local counter aggregate is threaded
+    through unchanged.
     """
 
     instances: list = []
@@ -465,6 +467,7 @@ class _FakeProductRunner:
         min_interval_seconds: float,
         logger: logging.Logger,
         artifacts_dir: Path,
+        metrics: object = None,
     ) -> None:
         self.adapter = adapter
         self.tab = tab
@@ -472,6 +475,7 @@ class _FakeProductRunner:
         self.min_interval_seconds = min_interval_seconds
         self.logger = logger
         self.artifacts_dir = artifacts_dir
+        self.metrics = metrics
         _FakeProductRunner.instances.append(self)
 
     def run(self) -> ProductCollection:  # type: ignore[override]

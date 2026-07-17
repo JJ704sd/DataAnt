@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import time
 from pathlib import Path
 
 from app.browser_session import BrowserSession
@@ -9,7 +10,7 @@ from app.excel_store import ExcelStore, OutputLockedError
 from app.input_loader import load_tasks
 from app.models import Status
 from app.product_output_bundle import ProductOutputBundle
-from app.product_runner import ProductRunner
+from app.product_runner import ProductRunMetrics, ProductRunner
 from app.runner import Runner
 from app.sites.douban_movie import DoubanMovieAdapter
 from app.sites.web_scraping_dev import WebScrapingDevAdapter
@@ -214,6 +215,7 @@ def _execute_products(args: argparse.Namespace, logger) -> int:
     browser_path = Path(args.browser_path) if args.browser_path else None
     profile_dir = Path(args.profile_dir)
     output_dir = Path(args.output_dir)
+    metrics = ProductRunMetrics()
 
     try:
         with BrowserSession(
@@ -227,6 +229,7 @@ def _execute_products(args: argparse.Namespace, logger) -> int:
                 min_interval_seconds=args.min_interval,
                 logger=logger,
                 artifacts_dir=_ARTIFACTS_DIR,
+                metrics=metrics,
             )
             collection = runner.run()
     except OutputLockedError as exc:
@@ -237,13 +240,44 @@ def _execute_products(args: argparse.Namespace, logger) -> int:
         return 5
 
     try:
+        bundle_started = time.perf_counter()
         ProductOutputBundle(output_dir).write(collection)
+        local_output_ms = (time.perf_counter() - bundle_started) * 1000.0
     except OutputLockedError as exc:
         logger.error("Output locked: %s", exc)
         return 4
     except Exception as exc:  # noqa: BLE001 — exit code 5 is the catch-all.
         logger.exception("Unexpected error: %s", exc)
         return 5
+
+    # Read back the three file sizes locally so the metric log stays
+    # strictly numeric. No HTML, cookie, header, profile path, or
+    # API key value is ever read or logged here.
+    bytes_by_file: dict[str, int] = {}
+    if output_dir.is_dir():
+        for artifact in sorted(output_dir.iterdir()):
+            if artifact.is_file():
+                bytes_by_file[artifact.name] = artifact.stat().st_size
+    bundle_bytes = sum(bytes_by_file.values())
+    writer_count = len(bytes_by_file)
+    record_count = collection.summary.total
+    logger.info(
+        "stage=metrics paced_operations=%s network_retry_count=%s "
+        "detail_records=%s discovery_ms=%.3f detail_ms=%.3f",
+        metrics.paced_operations,
+        metrics.network_retry_count,
+        metrics.detail_records,
+        metrics.discovery_seconds * 1000.0,
+        metrics.detail_seconds * 1000.0,
+    )
+    logger.info(
+        "stage=bundle local_output_ms=%.3f writers=%s records=%s "
+        "bundle_bytes=%s",
+        local_output_ms,
+        writer_count,
+        record_count,
+        bundle_bytes,
+    )
 
     if collection.summary.blocked:
         logger.error("Run was blocked by site protection")
