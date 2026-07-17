@@ -1,3 +1,4 @@
+import threading
 from pathlib import Path
 
 import pytest
@@ -75,3 +76,86 @@ def test_bundle_passes_shared_rows_to_excel(
 
     assert len(received) == 1
     assert received[0][0]["product_id"] == "1"
+
+
+def test_writer_failure_leaves_existing_bundle_and_cleans_siblings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "demo"
+    bundle = ProductOutputBundle(target)
+    bundle.write(collection("1"))
+    original_json = (target / "products.json").read_bytes()
+
+    def fail_gallery(*args, **kwargs):
+        raise RuntimeError("gallery writer failed")
+
+    monkeypatch.setattr(bundle_module, "render_gallery", fail_gallery)
+    with pytest.raises(RuntimeError, match="gallery writer failed"):
+        bundle.write(collection("2"))
+
+    assert (target / "products.json").read_bytes() == original_json
+    assert not list(target.parent.glob(f".{target.name}.staging-*"))
+    assert not list(target.parent.glob(f".{target.name}.backup-*"))
+
+
+def test_writer_active_counter_peaks_at_three(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "demo"
+    counter_lock = threading.Lock()
+    counter = {"active": 0, "peak": 0}
+    # Barrier ensures all three writers are simultaneously active so the
+    # counter records the true peak concurrency, not a transient snapshot.
+    barrier = threading.Barrier(3, timeout=5.0)
+
+    def track_active():
+        with counter_lock:
+            counter["active"] += 1
+            if counter["active"] > counter["peak"]:
+                counter["peak"] = counter["active"]
+
+    def release_active():
+        with counter_lock:
+            counter["active"] -= 1
+
+    real_excel = bundle_module.ProductExcel.write
+    real_write_text = bundle_module._write_text
+    real_render_gallery = bundle_module.render_gallery
+
+    def gated_excel(*args, **kwargs):
+        track_active()
+        try:
+            barrier.wait()
+            return real_excel(*args, **kwargs)
+        finally:
+            release_active()
+
+    def gated_json(path, content):
+        track_active()
+        try:
+            barrier.wait()
+            return real_write_text(path, content)
+        finally:
+            release_active()
+
+    def gated_gallery(collection, directory, snapshot):
+        track_active()
+        try:
+            barrier.wait()
+            # Bypass the wrapped _write_text to avoid a second barrier hit.
+            return real_write_text(
+                directory / "gallery.html",
+                real_render_gallery(collection, snapshot=snapshot),
+            )
+        finally:
+            release_active()
+
+    monkeypatch.setattr(bundle_module.ProductExcel, "write", gated_excel)
+    monkeypatch.setattr(bundle_module, "_write_text", gated_json)
+    monkeypatch.setattr(
+        bundle_module, "_render_and_write_gallery", gated_gallery
+    )
+
+    ProductOutputBundle(target).write(collection("1"))
+
+    assert counter["peak"] == 3
