@@ -101,6 +101,19 @@ def test_core_ci_is_offline_and_runs_portable_verification() -> None:
     assert "--max-queries" not in body_lowered, (
         "CI job body must not enable the max-queries CLI flag"
     )
+    assert "web-scraping.dev" not in body_lowered, (
+        "CI job body must not reference the second live site"
+    )
+    assert "collect-products" not in body_lowered, (
+        "CI job body must not enable the controlled product collection command"
+    )
+    assert "--max-products" not in body_lowered, (
+        "CI job body must not enable the max-products CLI flag"
+    )
+    for filename in ("products.xlsx", "products.json", "gallery.html"):
+        assert filename not in body, (
+            f"CI job body must not upload {filename}"
+        )
 
 
 def test_repository_agent_rules_define_the_lightweight_live_gate() -> None:

@@ -22,30 +22,38 @@ def write_coverage(path: Path, names: dict[str, float]) -> None:
     path.write_text(json.dumps(report), encoding="utf-8")
 
 
+ALL_REQUIRED_MODULES: dict[str, int] = {
+    "app/input_loader.py": 90,
+    "app/matcher.py": 95,
+    "app/sites/douban_movie.py": 91,
+    "app/sites/web_scraping_dev.py": 88,
+    "app/product_runner.py": 92,
+}
+
+
+def _normalize_keys(values: dict[str, float]) -> dict[str, float]:
+    return {key.replace("\\", "/"): value for key, value in values.items()}
+
+
 @pytest.mark.parametrize(
     "names",
     [
-        {"app/input_loader.py": 90, "app/matcher.py": 95, "app/sites/douban_movie.py": 91},
-        {"app\\input_loader.py": 90, "app\\matcher.py": 95, "app\\sites\\douban_movie.py": 91},
+        ALL_REQUIRED_MODULES,
+        {key.replace("/", "\\"): value for key, value in ALL_REQUIRED_MODULES.items()},
     ],
 )
 def test_verify_coverage_accepts_platform_specific_keys(tmp_path: Path, names: dict[str, float]) -> None:
     report = tmp_path / "coverage.json"
     write_coverage(report, names)
-    assert verify_coverage(report) == {
-        "app/input_loader.py": 90,
-        "app/matcher.py": 95,
-        "app/sites/douban_movie.py": 91,
-    }
+    assert verify_coverage(report) == _normalize_keys(names)
 
 
 def test_verify_coverage_rejects_a_module_below_80(tmp_path: Path) -> None:
     report = tmp_path / "coverage.json"
-    write_coverage(
-        report,
-        {"app/input_loader.py": 90, "app/matcher.py": 95, "app/sites/douban_movie.py": 79},
-    )
-    with pytest.raises(CoverageThresholdError, match="douban_movie.py: 79.00%"):
+    failing = dict(ALL_REQUIRED_MODULES)
+    failing["app/sites/web_scraping_dev.py"] = 75
+    write_coverage(report, failing)
+    with pytest.raises(CoverageThresholdError, match="web_scraping_dev.py: 75.00%"):
         verify_coverage(report)
 
 

@@ -10,10 +10,14 @@ name: core-offline
 #
 # Out of scope (must NOT happen here, by design):
 #   - Launching a browser (DrissionPage, Chromium, Edge, ...).
-#   - Reaching movie.douban.com or any other live host.
+#   - Reaching movie.douban.com, web-scraping.dev, or any other live
+#     host. The product collection command is a second offline-only
+#     entry point; this workflow must not invoke it, must not pass
+#     --live-approved or --max-products, and must not upload the
+#     products.xlsx / products.json / gallery.html bundle.
 #   - Reading MINIMAX_API_KEY or any other real LLM credential.
 #   - Executing a real LLM call against any provider.
-#   - Creating or fabricating a controlled workbook.
+#   - Creating or fabricating a controlled workbook or product bundle.
 #   - Uploading browser-profile/, outputs/, or artifacts/ as workflow
 #     artifacts.
 #
@@ -23,7 +27,7 @@ name: core-offline
 #   2. An approved controlled workbook plus its approval evidence — a
 #      CI run is NOT a substitute for compliance approval.
 # Without those, the release is BLOCKED; CI must not be bypassed to
-# reach movie.douban.com "just to make sure".
+# reach movie.douban.com or web-scraping.dev "just to make sure".
 #
 # MiniMax integration continues to be deferred.
 

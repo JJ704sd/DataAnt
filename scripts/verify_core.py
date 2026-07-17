@@ -11,6 +11,8 @@ REQUIRED_COVERAGE = {
     "app/input_loader.py": 80.0,
     "app/matcher.py": 80.0,
     "app/sites/douban_movie.py": 80.0,
+    "app/sites/web_scraping_dev.py": 80.0,
+    "app/product_runner.py": 80.0,
 }
 
 
