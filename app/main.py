@@ -8,8 +8,11 @@ from app.diagnostics import configure_logging
 from app.excel_store import ExcelStore, OutputLockedError
 from app.input_loader import load_tasks
 from app.models import Status
+from app.product_output_bundle import ProductOutputBundle
+from app.product_runner import ProductRunner
 from app.runner import Runner
 from app.sites.douban_movie import DoubanMovieAdapter
+from app.sites.web_scraping_dev import WebScrapingDevAdapter
 
 
 _ARTIFACTS_DIR = Path("artifacts")
@@ -18,6 +21,12 @@ _MIN_INTERVAL_DEFAULT = 5.0
 
 _LIVE_MIN_INTERVAL = 5.0
 _LIVE_MAX_QUERIES = 10
+
+
+_PRODUCT_PROFILE_DEFAULT = "browser-profile/web-scraping-dev"
+_PRODUCT_MIN_INTERVAL_DEFAULT = 2.0
+_PRODUCT_LIVE_MIN_INTERVAL = 2.0
+_PRODUCT_LIVE_MAX = 10
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -38,6 +47,22 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--profile-dir", default=_PROFILE_DEFAULT)
     run_parser.add_argument("--live-approved", action="store_true")
     run_parser.add_argument("--max-queries", type=int, default=None)
+
+    products_parser = subparsers.add_parser("collect-products")
+    products_parser.add_argument("--site", required=True)
+    products_parser.add_argument("--output-dir", required=True)
+    products_parser.add_argument(
+        "--headed", action=argparse.BooleanOptionalAction, default=True
+    )
+    products_parser.add_argument(
+        "--min-interval", type=float, default=_PRODUCT_MIN_INTERVAL_DEFAULT
+    )
+    products_parser.add_argument("--browser-path", default=None)
+    products_parser.add_argument(
+        "--profile-dir", default=_PRODUCT_PROFILE_DEFAULT
+    )
+    products_parser.add_argument("--live-approved", action="store_true")
+    products_parser.add_argument("--max-products", type=int, default=None)
 
     return parser
 
@@ -61,23 +86,68 @@ def _validate_live_run(args: argparse.Namespace, task_count: int, logger) -> boo
     return True
 
 
-def execute(argv: list[str] | None = None) -> int:
-    """Wire the run subcommand end-to-end and map outcomes to exit codes.
+def _validate_product_live_run(
+    args: argparse.Namespace, logger
+) -> bool:
+    """Validate the controlled web-scraping.dev live-run gate.
 
-    Sequence is fixed: parse args, configure logging, load input, then run
-    the live-run gate validation (before any retry parsing, store
-    construction, or browser work), convert retry strings to ``Status``,
-    build the Excel store, enter ``BrowserSession`` exactly once, hand
-    the same ``tab`` to ``Runner``, then exit the context.
-    ``OutputLockedError`` is caught explicitly (exit 4); any other
-    exception during the browser/runner phase is treated as a global
-    unexpected error (exit 5).
+    Runs in this fixed order so failures always short-circuit before
+    any ``BrowserSession`` is created, the adapter is instantiated, the
+    runner is constructed, or the output bundle is opened:
+
+    1. ``--live-approved`` must be present.
+    2. ``--max-products`` must be an integer in ``[1, 10]``.
+    3. The browser must run headed.
+    4. ``--min-interval`` must be at least 2 seconds.
+    5. ``--site`` must be the approved ``web-scraping.dev`` identifier.
+    6. The output directory must resolve inside the repository
+       ``outputs/`` root.
+    7. The profile directory must resolve inside the repository
+       ``browser-profile/`` root.
     """
-    parser = build_parser()
-    args = parser.parse_args(argv)
+    if not args.live_approved:
+        logger.error("Live run requires --live-approved")
+        return False
+    if (
+        args.max_products is None
+        or not 1 <= args.max_products <= _PRODUCT_LIVE_MAX
+    ):
+        logger.error(
+            "--max-products must be between 1 and %s", _PRODUCT_LIVE_MAX
+        )
+        return False
+    if not args.headed:
+        logger.error("Live run requires headed browser mode")
+        return False
+    if args.min_interval < _PRODUCT_LIVE_MIN_INTERVAL:
+        logger.error(
+            "Live run requires --min-interval >= %.1f",
+            _PRODUCT_LIVE_MIN_INTERVAL,
+        )
+        return False
+    if args.site != "web-scraping.dev":
+        logger.error("Unsupported site: %s", args.site)
+        return False
+    repo_root = Path(__file__).resolve().parent.parent
+    output_path = Path(args.output_dir).resolve()
+    profile_path = Path(args.profile_dir).resolve()
+    outputs_root = (repo_root / "outputs").resolve()
+    profiles_root = (repo_root / "browser-profile").resolve()
+    if not output_path.is_relative_to(outputs_root):
+        logger.error(
+            "Output dir must live inside %s", outputs_root
+        )
+        return False
+    if not profile_path.is_relative_to(profiles_root):
+        logger.error(
+            "Profile dir must live inside %s", profiles_root
+        )
+        return False
+    return True
 
-    logger = configure_logging(_ARTIFACTS_DIR)
 
+def _execute_douban(args: argparse.Namespace, logger) -> int:
+    """Run the existing Douban flow; preserved behavior contract."""
     try:
         tasks = load_tasks(Path(args.input))
     except ValueError as exc:
@@ -127,6 +197,78 @@ def execute(argv: list[str] | None = None) -> int:
         return 3
 
     return 0
+
+
+def _execute_products(args: argparse.Namespace, logger) -> int:
+    """Run the controlled product collection flow.
+
+    The live-run gate runs first, before any ``BrowserSession``,
+    adapter, runner, or output bundle is created. On success, one
+    browser session drives one product runner and one output bundle.
+    Exit codes: 0 success, 2 validation failure, 3 blocked run, 4
+    output lock, 5 unclassified exception.
+    """
+    if not _validate_product_live_run(args, logger):
+        return 2
+
+    browser_path = Path(args.browser_path) if args.browser_path else None
+    profile_dir = Path(args.profile_dir)
+    output_dir = Path(args.output_dir)
+
+    try:
+        with BrowserSession(
+            args.headed, _ARTIFACTS_DIR, profile_dir, browser_path
+        ) as tab:
+            adapter = WebScrapingDevAdapter()
+            runner = ProductRunner(
+                adapter,
+                tab,
+                max_products=args.max_products,
+                min_interval_seconds=args.min_interval,
+                logger=logger,
+                artifacts_dir=_ARTIFACTS_DIR,
+            )
+            collection = runner.run()
+    except OutputLockedError as exc:
+        logger.error("Output locked: %s", exc)
+        return 4
+    except Exception as exc:  # noqa: BLE001 — exit code 5 is the catch-all.
+        logger.exception("Unexpected error: %s", exc)
+        return 5
+
+    try:
+        ProductOutputBundle(output_dir).write(collection)
+    except OutputLockedError as exc:
+        logger.error("Output locked: %s", exc)
+        return 4
+    except Exception as exc:  # noqa: BLE001 — exit code 5 is the catch-all.
+        logger.exception("Unexpected error: %s", exc)
+        return 5
+
+    if collection.summary.blocked:
+        logger.error("Run was blocked by site protection")
+        return 3
+
+    return 0
+
+
+def execute(argv: list[str] | None = None) -> int:
+    """Parse CLI args, configure logging, then dispatch by subcommand.
+
+    The Douban and product flows each own their own pre-browser
+    authorization gate, output lifecycle, and exit-code mapping. This
+    dispatcher only chooses the right one.
+    """
+    parser = build_parser()
+    args = parser.parse_args(argv)
+
+    logger = configure_logging(_ARTIFACTS_DIR)
+
+    if args.command == "run":
+        return _execute_douban(args, logger)
+    if args.command == "collect-products":
+        return _execute_products(args, logger)
+    raise AssertionError(f"unsupported command: {args.command}")
 
 
 def main() -> int:

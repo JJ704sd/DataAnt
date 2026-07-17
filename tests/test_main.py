@@ -10,6 +10,7 @@ from app.excel_store import OutputLockedError
 from app.input_loader import InputError
 from app.main import build_parser, execute
 from app.models import RunSummary, Status, Task
+from app.product_models import ProductCollection, ProductRecord, ProductStatus
 
 
 def test_run_command_requires_input_and_output() -> None:
@@ -168,12 +169,19 @@ def stub_dependencies(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     _FakeRunner.instances.clear()
     _FakeRunner.next_summary = RunSummary(processed=0, skipped=0, blocked=False)
     _FakeBrowserSession.instances.clear()
+    _FakeProductRunner.instances.clear()
+    _FakeProductOutputBundle.instances.clear()
+    _FakeProductOutputBundle.raise_on_write = None
+    _FakeProductOutputBundle.blocked_flag = False
 
     monkeypatch.setattr(main, "load_tasks", lambda p: [Task("t1", "英雄", None)])
     monkeypatch.setattr(main, "ExcelStore", _FakeStore)
     monkeypatch.setattr(main, "BrowserSession", _FakeBrowserSession)
     monkeypatch.setattr(main, "DoubanMovieAdapter", _FakeAdapter)
     monkeypatch.setattr(main, "Runner", _FakeRunner)
+    monkeypatch.setattr(main, "WebScrapingDevAdapter", _FakeProductAdapter)
+    monkeypatch.setattr(main, "ProductRunner", _FakeProductRunner)
+    monkeypatch.setattr(main, "ProductOutputBundle", _FakeProductOutputBundle)
     monkeypatch.setattr(
         main, "configure_logging", lambda p: logging.getLogger("browser_bot")
     )
@@ -182,7 +190,12 @@ def stub_dependencies(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     csv.write_text("query\n英雄\n", encoding="utf-8")
     out = tmp_path / "out.xlsx"
 
-    return {"csv": csv, "out": out}
+    return {
+        "csv": csv,
+        "out": out,
+        "out_dir": "outputs/demo",
+        "profile_dir": "browser-profile/web-scraping-dev",
+    }
 
 
 def live_args(stub_dependencies: dict, *extra: str) -> list[str]:
@@ -420,3 +433,302 @@ def test_execute_accepts_valid_retry_statuses(stub_dependencies: dict) -> None:
     runner = _FakeRunner.instances[0]
     assert Status.NOT_FOUND in runner.retry
     assert Status.REVIEW_REQUIRED in runner.retry
+
+
+# --------------------------------------------------------------------------- #
+# Test doubles for collect-products
+# --------------------------------------------------------------------------- #
+
+
+class _FakeProductAdapter:
+    """Empty stand-in for WebScrapingDevAdapter — never invoked in unit tests."""
+
+
+class _FakeProductRunner:
+    """Records every construction call and returns a configurable collection.
+
+    Mirrors the production ``ProductRunner`` keyword-only signature so the
+    CLI passes arguments the same way. ``next_collection`` controls the
+    return value of ``run()`` so individual tests can flip the
+    ``blocked`` flag without re-instantiating the fake.
+    """
+
+    instances: list = []
+    next_collection_blocked: bool = False
+
+    def __init__(
+        self,
+        adapter: object,
+        tab: object,
+        *,
+        max_products: int,
+        min_interval_seconds: float,
+        logger: logging.Logger,
+        artifacts_dir: Path,
+    ) -> None:
+        self.adapter = adapter
+        self.tab = tab
+        self.max_products = max_products
+        self.min_interval_seconds = min_interval_seconds
+        self.logger = logger
+        self.artifacts_dir = artifacts_dir
+        _FakeProductRunner.instances.append(self)
+
+    def run(self) -> ProductCollection:  # type: ignore[override]
+        record = ProductRecord.success_fixture(
+            "1", status=ProductStatus.SUCCESS
+        )
+        return ProductCollection.from_records(
+            [record],
+            generated_at="2026-07-16T20:00:00+08:00",
+            blocked=_FakeProductRunner.next_collection_blocked,
+        )
+
+
+class _FakeProductOutputBundle:
+    """Records construction and ``write`` calls; lets a test force a raise.
+
+    ``raise_on_write`` is read once per ``write`` call so a test can wire
+    an exception that fires when the CLI calls ``bundle.write(...)``.
+    ``blocked_flag`` is exposed for tests that want to assert the
+    run-level blocked signal is propagated.
+    """
+
+    instances: list = []
+    raise_on_write: BaseException | None = None
+    blocked_flag: bool = False
+
+    def __init__(self, target_dir: Path) -> None:
+        self.target_dir = target_dir
+        self.write_calls: int = 0
+        _FakeProductOutputBundle.instances.append(self)
+
+    def write(self, collection: ProductCollection) -> None:  # type: ignore[override]
+        self.write_calls += 1
+        if _FakeProductOutputBundle.raise_on_write is not None:
+            raise _FakeProductOutputBundle.raise_on_write
+
+
+def products_live_args(
+    stub_dependencies: dict, *extra: str
+) -> list[str]:
+    return [
+        "collect-products",
+        "--site", "web-scraping.dev",
+        "--output-dir", stub_dependencies["out_dir"],
+        "--live-approved",
+        "--max-products", "3",
+        "--profile-dir", stub_dependencies["profile_dir"],
+        *extra,
+    ]
+
+
+# --------------------------------------------------------------------------- #
+# collect-products parser contract
+# --------------------------------------------------------------------------- #
+
+
+def test_collect_products_parser_has_safe_defaults() -> None:
+    args = build_parser().parse_args(
+        [
+            "collect-products",
+            "--site", "web-scraping.dev",
+            "--output-dir", "outputs/demo",
+        ]
+    )
+    assert args.site == "web-scraping.dev"
+    assert args.output_dir == "outputs/demo"
+    assert args.headed is True
+    assert args.min_interval == 2.0
+    assert args.profile_dir == "browser-profile/web-scraping-dev"
+    assert args.live_approved is False
+    assert args.max_products is None
+
+
+# --------------------------------------------------------------------------- #
+# collect-products pre-browser authorization gate
+# --------------------------------------------------------------------------- #
+
+
+def test_collect_products_requires_live_approved(
+    stub_dependencies: dict,
+) -> None:
+    rc = execute(
+        [
+            "collect-products",
+            "--site", "web-scraping.dev",
+            "--output-dir", stub_dependencies["out_dir"],
+            "--max-products", "3",
+            "--profile-dir", stub_dependencies["profile_dir"],
+        ]
+    )
+    assert rc == 2
+    assert _FakeBrowserSession.instances == []
+    assert _FakeProductRunner.instances == []
+
+
+@pytest.mark.parametrize("value", ["0", "11"])
+def test_collect_products_rejects_max_products_outside_one_to_ten(
+    stub_dependencies: dict, value: str
+) -> None:
+    rc = execute(
+        products_live_args(stub_dependencies, "--max-products", value)
+    )
+    assert rc == 2
+    assert _FakeBrowserSession.instances == []
+    assert _FakeProductRunner.instances == []
+
+
+def test_collect_products_rejects_missing_max_products(
+    stub_dependencies: dict,
+) -> None:
+    arguments = [
+        "collect-products",
+        "--site", "web-scraping.dev",
+        "--output-dir", stub_dependencies["out_dir"],
+        "--live-approved",
+        "--profile-dir", stub_dependencies["profile_dir"],
+    ]
+    assert execute(arguments) == 2
+    assert _FakeBrowserSession.instances == []
+    assert _FakeProductRunner.instances == []
+
+
+def test_collect_products_rejects_headless_mode(
+    stub_dependencies: dict,
+) -> None:
+    rc = execute(products_live_args(stub_dependencies, "--no-headed"))
+    assert rc == 2
+    assert _FakeBrowserSession.instances == []
+    assert _FakeProductRunner.instances == []
+
+
+def test_collect_products_rejects_min_interval_below_two(
+    stub_dependencies: dict,
+) -> None:
+    rc = execute(products_live_args(stub_dependencies, "--min-interval", "1.99"))
+    assert rc == 2
+    assert _FakeBrowserSession.instances == []
+    assert _FakeProductRunner.instances == []
+
+
+def test_collect_products_rejects_unknown_site(
+    stub_dependencies: dict,
+) -> None:
+    rc = execute(
+        [
+            "collect-products",
+            "--site", "other.example",
+            "--output-dir", stub_dependencies["out_dir"],
+            "--live-approved",
+            "--max-products", "3",
+            "--profile-dir", stub_dependencies["profile_dir"],
+        ]
+    )
+    assert rc == 2
+    assert _FakeBrowserSession.instances == []
+    assert _FakeProductRunner.instances == []
+
+
+def test_collect_products_rejects_output_dir_outside_repo_outputs(
+    stub_dependencies: dict, tmp_path: Path,
+) -> None:
+    outside = tmp_path / "escape"
+    rc = execute(products_live_args(stub_dependencies, "--output-dir", str(outside)))
+    assert rc == 2
+    assert _FakeBrowserSession.instances == []
+    assert _FakeProductRunner.instances == []
+
+
+def test_collect_products_rejects_profile_dir_outside_repo_browser_profile(
+    stub_dependencies: dict, tmp_path: Path,
+) -> None:
+    outside = tmp_path / "escape-profile"
+    rc = execute(products_live_args(stub_dependencies, "--profile-dir", str(outside)))
+    assert rc == 2
+    assert _FakeBrowserSession.instances == []
+    assert _FakeProductRunner.instances == []
+
+
+# --------------------------------------------------------------------------- #
+# collect-products exit code mapping
+# --------------------------------------------------------------------------- #
+
+
+def test_collect_products_constructs_one_browser_and_one_runner(
+    stub_dependencies: dict,
+) -> None:
+    rc = execute(products_live_args(stub_dependencies))
+
+    assert rc == 0
+    assert len(_FakeBrowserSession.instances) == 1
+    assert len(_FakeProductRunner.instances) == 1
+    runner = _FakeProductRunner.instances[0]
+    session = _FakeBrowserSession.instances[0]
+    assert runner.tab is session._tab
+    assert runner.max_products == 3
+    assert runner.min_interval_seconds == 2.0
+    assert session.profile_dir == Path("browser-profile/web-scraping-dev")
+    assert len(_FakeProductOutputBundle.instances) == 1
+    bundle = _FakeProductOutputBundle.instances[0]
+    assert bundle.write_calls == 1
+    assert bundle.target_dir == Path("outputs/demo")
+
+
+def test_collect_products_returns_3_when_collection_blocked(
+    stub_dependencies: dict,
+) -> None:
+    _FakeProductRunner.next_collection_blocked = True
+
+    rc = execute(products_live_args(stub_dependencies))
+
+    assert rc == 3
+    assert _FakeProductOutputBundle.instances[0].write_calls == 1
+
+
+def test_collect_products_returns_4_for_output_locked_error(
+    stub_dependencies: dict,
+) -> None:
+    _FakeProductOutputBundle.raise_on_write = OutputLockedError("locked")
+
+    rc = execute(products_live_args(stub_dependencies))
+
+    assert rc == 4
+
+
+def test_collect_products_returns_5_for_unexpected_browser_error(
+    stub_dependencies: dict, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _BoomSession:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            return None
+
+        def __enter__(self) -> object:
+            raise RuntimeError("product browser boom")
+
+        def __exit__(self, exc_type: object, exc: object, tb: object) -> bool:
+            return False
+
+    monkeypatch.setattr(main, "BrowserSession", _BoomSession)
+
+    rc = execute(products_live_args(stub_dependencies))
+
+    assert rc == 5
+
+
+def test_collect_products_returns_5_for_unexpected_runner_error(
+    stub_dependencies: dict, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _BoomRunner:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            return None
+
+        def run(self) -> ProductCollection:
+            raise RuntimeError("product runner boom")
+
+    monkeypatch.setattr(main, "ProductRunner", _BoomRunner)
+
+    rc = execute(products_live_args(stub_dependencies))
+
+    assert rc == 5
+    assert _FakeProductOutputBundle.instances == []

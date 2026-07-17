@@ -11,6 +11,16 @@
 - Never use `--retry-status BLOCKED`. `--retry-status SITE_PROTECTION_CHALLENGE` is also forbidden for the same reason.
 - Keep browser profiles, cookies, sessions, HTML, screenshots, logs, evidence, and workbooks out of Git.
 
+## web-scraping.dev live runs
+
+- Real access requires explicit `--live-approved`.
+- Every command must include `--max-products N`, where `1 <= N <= 10`.
+- Runs must use `--headed` and `--min-interval 2` or greater.
+- Only `/products`, valid product pagination, and `/product/<digits>` may be accessed.
+- Never access `/robots-disallowed`, login, cart, reviews, GraphQL, CSRF, downloads, or challenge endpoints.
+- Stop immediately on 429, blocking, login/security checks, challenge pages, or redirects outside `web-scraping.dev`.
+- Never automate protection bypasses.
+
 ## Offline CI
 
 - CI must never invoke `--live-approved`, launch a live browser, or access `movie.douban.com`.
