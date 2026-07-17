@@ -1,4 +1,6 @@
+import os
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -159,3 +161,35 @@ def test_writer_active_counter_peaks_at_three(
     ProductOutputBundle(target).write(collection("1"))
 
     assert counter["peak"] == 3
+
+
+def test_cleanup_stale_siblings_only_removes_generated_old_dirs(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "demo"
+    stale = target.with_name(".demo.staging-old")
+    fresh = target.with_name(".demo.backup-fresh")
+    unrelated = target.with_name(".demo-not-generated")
+    stale.mkdir()
+    fresh.mkdir()
+    unrelated.mkdir()
+    old = time.time() - 48 * 60 * 60
+    os.utime(stale, (old, old))
+
+    ProductOutputBundle(target).cleanup_stale_siblings(
+        max_age_seconds=24 * 60 * 60,
+    )
+
+    assert not stale.exists()
+    assert fresh.exists()
+    assert unrelated.exists()
+
+
+def test_cleanup_stale_siblings_rejects_non_positive_threshold(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "demo"
+    with pytest.raises(ValueError, match="max_age_seconds"):
+        ProductOutputBundle(target).cleanup_stale_siblings(
+            max_age_seconds=0,
+        )

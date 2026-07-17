@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -80,6 +81,34 @@ class ProductOutputBundle:
             for record in ProductExcel.read(self.target_dir / "products.xlsx")
         ]
 
+    def cleanup_stale_siblings(
+        self,
+        *,
+        max_age_seconds: float,
+    ) -> tuple[Path, ...]:
+        """Remove sibling staging/backup directories older than the threshold.
+
+        Only matches the ``.{name}.staging-*`` and ``.{name}.backup-*``
+        naming convention produced by :meth:`_sibling_path`; unrelated
+        dotfiles in the same parent directory are left untouched. The
+        caller is expected to invoke this once before creating a new
+        staging directory so crashed runs cannot accumulate forever.
+        """
+        if max_age_seconds <= 0:
+            raise ValueError("max_age_seconds must be positive")
+        prefix = f".{self.target_dir.name}."
+        now = time.time()
+        removed: list[Path] = []
+        for candidate in self.target_dir.parent.iterdir():
+            if not candidate.is_dir() or not candidate.name.startswith(prefix):
+                continue
+            if ".staging-" not in candidate.name and ".backup-" not in candidate.name:
+                continue
+            if now - candidate.stat().st_mtime > max_age_seconds:
+                shutil.rmtree(candidate)
+                removed.append(candidate)
+        return tuple(removed)
+
     def write(self, new_collection: ProductCollection) -> None:
         merged_records = self._merged_records(new_collection)
         if len(merged_records) > BUNDLE_LIMIT:
@@ -93,6 +122,8 @@ class ProductOutputBundle:
         )
 
         snapshot = build_product_output_snapshot(merged_collection)
+
+        self.cleanup_stale_siblings(max_age_seconds=24 * 60 * 60)
 
         staging_dir = self._sibling_path("staging")
         backup_dir: Path | None = None
