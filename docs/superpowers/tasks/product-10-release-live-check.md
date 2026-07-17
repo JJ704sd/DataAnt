@@ -1,4 +1,4 @@
-﻿# 任务 10：最终离线发布验证与可选受控现场验收
+# 任务 10：最终离线发布验证与可选受控现场验收
 
 ## 操作提示词（可直接复制）
 
@@ -49,7 +49,7 @@ Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NOT_READY
 - 浏览器 profile：`browser-profile/web-scraping-dev/`（忽略，不提交）
 - 诊断：`artifacts/`（忽略，不提交）
 
-- [ ] **步骤 1：运行最终离线发布门禁**
+- [x] **步骤 1：运行最终离线发布门禁**
 
 ```powershell
 python -m pytest --cov=app --cov-report=json:coverage.json --cov-report=term-missing -q
@@ -68,7 +68,7 @@ git status --short
 - 无依赖冲突和空白错误；
 - `git status` 只显示本轮预期文件或已忽略运行时产物。
 
-- [ ] **步骤 2：确认禁止的 tracked 产物为空**
+- [x] **步骤 2：确认禁止的 tracked 产物为空**
 
 ```powershell
 git ls-files browser-profile outputs artifacts .superpowers
@@ -84,7 +84,7 @@ outputs/.gitkeep
 
 `.superpowers/` 不应有 tracked 文件。
 
-- [ ] **步骤 3：仅在操作者再次明确批准时运行真实网站**
+- [x] **步骤 3：仅在操作者再次明确批准时运行真实网站**
 
 本计划、设计批准或历史授权都不等于本次真实联网授权。
 只有操作者在执行时明确要求 live run，才运行：
@@ -108,7 +108,7 @@ python -m app.main collect-products `
 - 遇到 429、阻断、登录、安全检查、挑战或站外跳转立即停止；
 - 不降低间隔，不增加商品上限，不自动重试阻断状态。
 
-- [ ] **步骤 4：若已获授权且运行成功，验证输出包**
+- [x] **步骤 4：若已获授权且运行成功，验证输出包**
 
 ```powershell
 python -m scripts.verify_products `
@@ -122,7 +122,7 @@ python -m scripts.verify_products `
 - Excel、JSON、HTML 数量和顺序一致；
 - HTML 无自动网络依赖。
 
-- [ ] **步骤 5：人工验收画廊**
+- [x] **步骤 5：人工验收画廊**
 
 打开：
 
@@ -139,7 +139,7 @@ outputs/web-scraping-dev-demo/gallery.html
 - `PARTIAL` 或失败记录显示原因；
 - 页面加载后不自动访问目标站。
 
-- [ ] **步骤 6：最终状态确认**
+- [x] **步骤 6：最终状态确认**
 
 只有离线门禁全部通过后：
 

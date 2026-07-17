@@ -1,4 +1,4 @@
-﻿# 任务 0：恢复设计提交后的绿色离线基线
+# 任务 0：恢复设计提交后的绿色离线基线
 
 ## 操作提示词（可直接复制）
 
@@ -44,7 +44,7 @@ Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NOT_READY
 - 修改：`tests/test_project_config.py:21`
 - 测试：`tests/test_project_config.py`
 
-- [ ] **步骤 1：更新精确 `.gitignore` 契约**
+- [x] **步骤 1：更新精确 `.gitignore` 契约**
 
 在期望列表的 `htmlcov/` 与 `.env` 之间加入：
 
@@ -63,7 +63,7 @@ assert not any(
 )
 ```
 
-- [ ] **步骤 2：运行配置测试**
+- [x] **步骤 2：运行配置测试**
 
 运行：
 
@@ -73,7 +73,7 @@ python -m pytest tests/test_project_config.py -q
 
 预期：全部通过；不再出现 `.superpowers/` 列表差异。
 
-- [ ] **步骤 3：运行完整基线**
+- [x] **步骤 3：运行完整基线**
 
 运行：
 
@@ -83,7 +83,7 @@ python -m pytest -q
 
 预期：164 项测试全部通过。
 
-- [ ] **步骤 4：提交基线修复**
+- [x] **步骤 4：提交基线修复**
 
 ```powershell
 git add tests/test_project_config.py

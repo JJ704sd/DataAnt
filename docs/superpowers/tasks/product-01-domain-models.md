@@ -1,4 +1,4 @@
-﻿# 任务 1：提取共享站点错误并建立商品领域模型
+# 任务 1：提取共享站点错误并建立商品领域模型
 
 ## 操作提示词（可直接复制）
 
@@ -49,7 +49,7 @@ Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NOT_READY
 - 修改：`tests/test_douban_parser.py:8-16`
 - 修改：`tests/test_runner.py:15-25`
 
-- [ ] **步骤 1：先写商品模型失败测试**
+- [x] **步骤 1：先写商品模型失败测试**
 
 创建 `tests/test_product_models.py`：
 
@@ -122,7 +122,7 @@ def test_collection_summary_counts_terminal_groups() -> None:
     assert collection.summary.failed == 1
 ```
 
-- [ ] **步骤 2：运行测试确认缺少模块**
+- [x] **步骤 2：运行测试确认缺少模块**
 
 运行：
 
@@ -132,7 +132,7 @@ python -m pytest tests/test_product_models.py -q
 
 预期：导入 `app.product_models` 失败。
 
-- [ ] **步骤 3：创建共享错误**
+- [x] **步骤 3：创建共享错误**
 
 创建 `app/site_errors.py`：
 
@@ -167,7 +167,7 @@ from app.site_errors import (
 `app/runner.py` 与相关测试也改为从 `app.site_errors` 导入；豆瓣适配器仍可通过
 模块级导入继续暴露相同名字，避免不必要的调用方破坏。
 
-- [ ] **步骤 4：实现商品模型**
+- [x] **步骤 4：实现商品模型**
 
 创建 `app/product_models.py`，包含：
 
@@ -316,7 +316,7 @@ class ProductCollection:
 `success_fixture()` 只作为测试构造器；如果实现者更偏好放在测试辅助模块，可在本任务中
 将其移动到 `tests/product_fixtures.py`，但后续所有测试必须统一使用一个位置。
 
-- [ ] **步骤 5：运行共享错误和模型测试**
+- [x] **步骤 5：运行共享错误和模型测试**
 
 运行：
 
@@ -326,7 +326,7 @@ python -m pytest tests/test_product_models.py tests/test_douban_parser.py tests/
 
 预期：全部通过，豆瓣错误语义没有变化。
 
-- [ ] **步骤 6：提交领域边界**
+- [x] **步骤 6：提交领域边界**
 
 ```powershell
 git add app/site_errors.py app/product_models.py app/sites/douban_movie.py app/runner.py tests/test_product_models.py tests/test_douban_parser.py tests/test_runner.py

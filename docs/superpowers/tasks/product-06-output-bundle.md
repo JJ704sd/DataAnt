@@ -1,4 +1,4 @@
-﻿# 任务 6：实现三产物原子输出包
+# 任务 6：实现三产物原子输出包
 
 ## 操作提示词（可直接复制）
 
@@ -44,7 +44,7 @@ Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NOT_READY
 - 新建：`app/product_output_bundle.py`
 - 新建：`tests/test_product_output_bundle.py`
 
-- [ ] **步骤 1：写完整输出和回滚失败测试**
+- [x] **步骤 1：写完整输出和回滚失败测试**
 
 创建 `tests/test_product_output_bundle.py`，覆盖：
 
@@ -111,7 +111,7 @@ def test_failed_directory_swap_restores_previous_bundle(
     assert (target / "products.json").read_bytes() == original_json
 ```
 
-- [ ] **步骤 2：运行测试确认缺少输出包**
+- [x] **步骤 2：运行测试确认缺少输出包**
 
 ```powershell
 python -m pytest tests/test_product_output_bundle.py -q
@@ -119,7 +119,7 @@ python -m pytest tests/test_product_output_bundle.py -q
 
 预期：缺少模块。
 
-- [ ] **步骤 3：实现目录级提交**
+- [x] **步骤 3：实现目录级提交**
 
 创建 `app/product_output_bundle.py`：
 
@@ -154,7 +154,7 @@ def read_product_ids(self) -> list[str]:
 
 供测试和后续验证脚本使用。
 
-- [ ] **步骤 4：运行输出包测试**
+- [x] **步骤 4：运行输出包测试**
 
 ```powershell
 python -m pytest tests/test_product_output_bundle.py -q
@@ -162,7 +162,7 @@ python -m pytest tests/test_product_output_bundle.py -q
 
 预期：全部通过。
 
-- [ ] **步骤 5：提交原子输出**
+- [x] **步骤 5：提交原子输出**
 
 ```powershell
 git add app/product_output_bundle.py tests/test_product_output_bundle.py

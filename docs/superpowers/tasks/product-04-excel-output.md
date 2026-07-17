@@ -1,4 +1,4 @@
-﻿# 任务 4：实现商品 Excel 合并与原子序列化
+# 任务 4：实现商品 Excel 合并与原子序列化
 
 ## 操作提示词（可直接复制）
 
@@ -44,7 +44,7 @@ Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NOT_READY
 - 新建：`app/product_excel.py`
 - 新建：`tests/test_product_excel.py`
 
-- [ ] **步骤 1：写工作簿失败测试**
+- [x] **步骤 1：写工作簿失败测试**
 
 创建 `tests/test_product_excel.py`：
 
@@ -86,7 +86,7 @@ def test_wrong_existing_schema_is_rejected(tmp_path: Path) -> None:
         ProductExcel.read(path)
 ```
 
-- [ ] **步骤 2：运行测试确认缺少模块**
+- [x] **步骤 2：运行测试确认缺少模块**
 
 ```powershell
 python -m pytest tests/test_product_excel.py -q
@@ -94,7 +94,7 @@ python -m pytest tests/test_product_excel.py -q
 
 预期：缺少 `app.product_excel`。
 
-- [ ] **步骤 3：实现商品工作簿**
+- [x] **步骤 3：实现商品工作簿**
 
 创建 `app/product_excel.py`：
 
@@ -109,7 +109,7 @@ python -m pytest tests/test_product_excel.py -q
 - 写入调用方提供的暂存路径；目录交换由后续输出包负责。
 - 错误 schema 明确抛 `ValueError`。
 
-- [ ] **步骤 4：运行工作簿测试**
+- [x] **步骤 4：运行工作簿测试**
 
 ```powershell
 python -m pytest tests/test_product_excel.py -q
@@ -117,7 +117,7 @@ python -m pytest tests/test_product_excel.py -q
 
 预期：全部通过。
 
-- [ ] **步骤 5：提交 Excel 输出**
+- [x] **步骤 5：提交 Excel 输出**
 
 ```powershell
 git add app/product_excel.py tests/test_product_excel.py

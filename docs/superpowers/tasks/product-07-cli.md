@@ -1,4 +1,4 @@
-﻿# 任务 7：接入独立 `collect-products` CLI
+# 任务 7：接入独立 `collect-products` CLI
 
 ## 操作提示词（可直接复制）
 
@@ -45,7 +45,7 @@ Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NOT_READY
 - 修改：`tests/test_main.py`
 - 修改：`AGENTS.md`
 
-- [ ] **步骤 1：写 CLI 参数失败测试**
+- [x] **步骤 1：写 CLI 参数失败测试**
 
 在 `tests/test_main.py` 增加：
 
@@ -67,7 +67,7 @@ def test_collect_products_parser_has_safe_defaults() -> None:
     assert args.max_products is None
 ```
 
-- [ ] **步骤 2：写浏览器创建前门禁测试**
+- [x] **步骤 2：写浏览器创建前门禁测试**
 
 使用独立 `_FakeProductRunner` 和 `_FakeProductOutputBundle`，验证：
 
@@ -83,7 +83,7 @@ def test_collect_products_parser_has_safe_defaults() -> None:
 - 输出锁定返回 4。
 - 浏览器或运行器未分类异常返回 5。
 
-- [ ] **步骤 3：运行新增 CLI 测试确认失败**
+- [x] **步骤 3：运行新增 CLI 测试确认失败**
 
 ```powershell
 python -m pytest tests/test_main.py -q
@@ -91,7 +91,7 @@ python -m pytest tests/test_main.py -q
 
 预期：`collect-products` 子命令不存在。
 
-- [ ] **步骤 4：重构命令分派并实现商品门禁**
+- [x] **步骤 4：重构命令分派并实现商品门禁**
 
 在 `app/main.py`：
 
@@ -145,7 +145,7 @@ products_parser.add_argument("--max-products", type=int, default=None)
 - blocked 汇总返回 3；`OutputLockedError` 返回 4；
   未分类异常返回 5；验证失败返回 2；成功返回 0。
 
-- [ ] **步骤 5：在 AGENTS.md 固化第二站点规则**
+- [x] **步骤 5：在 AGENTS.md 固化第二站点规则**
 
 增加：
 
@@ -163,7 +163,7 @@ products_parser.add_argument("--max-products", type=int, default=None)
 - Never automate protection bypasses.
 ```
 
-- [ ] **步骤 6：运行 CLI 和现有豆瓣测试**
+- [x] **步骤 6：运行 CLI 和现有豆瓣测试**
 
 ```powershell
 python -m pytest tests/test_main.py tests/test_runner.py tests/test_douban_parser.py -q
@@ -171,7 +171,7 @@ python -m pytest tests/test_main.py tests/test_runner.py tests/test_douban_parse
 
 预期：全部通过，现有 `run` 参数和退出码保持不变。
 
-- [ ] **步骤 7：提交 CLI 接线**
+- [x] **步骤 7：提交 CLI 接线**
 
 ```powershell
 git add app/main.py tests/test_main.py AGENTS.md

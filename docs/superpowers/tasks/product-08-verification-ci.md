@@ -1,4 +1,4 @@
-﻿# 任务 8：增加跨产物验证、覆盖率门禁和离线 CI 保护
+# 任务 8：增加跨产物验证、覆盖率门禁和离线 CI 保护
 
 ## 操作提示词（可直接复制）
 
@@ -48,7 +48,7 @@ Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NOT_READY
 - 修改：`tests/test_project_config.py:45-94`
 - 修改：`.github/workflows/core-offline.yml`
 
-- [ ] **步骤 1：写三产物一致性失败测试**
+- [x] **步骤 1：写三产物一致性失败测试**
 
 创建 `tests/test_verify_products.py`，使用测试输出包生成基线，然后验证：
 
@@ -88,7 +88,7 @@ def test_verify_bundle_rejects_json_id_mismatch(tmp_path: Path) -> None:
 - HTML 不含对应嵌入 ID；
 - HTML 含 `<script src=`、`fetch(` 或外部字体。
 
-- [ ] **步骤 2：实现 `scripts/verify_products.py`**
+- [x] **步骤 2：实现 `scripts/verify_products.py`**
 
 公开：
 
@@ -116,7 +116,7 @@ CLI：
 python -m scripts.verify_products --output-dir .\outputs\web-scraping-dev-demo
 ```
 
-- [ ] **步骤 3：扩展覆盖率门禁**
+- [x] **步骤 3：扩展覆盖率门禁**
 
 在 `scripts/verify_core.py`：
 
@@ -132,7 +132,7 @@ REQUIRED_COVERAGE = {
 
 更新 `tests/test_verify_core.py` 的平台路径、通过和失败用例。
 
-- [ ] **步骤 4：强化 CI 静态保护**
+- [x] **步骤 4：强化 CI 静态保护**
 
 更新 `tests/test_project_config.py`：
 
@@ -144,7 +144,7 @@ REQUIRED_COVERAGE = {
 更新 `.github/workflows/core-offline.yml` 顶部注释，明确第二站点也禁止真实访问。
 工作流执行步骤仍只有安装、pytest、覆盖率门禁、diff 检查和 tracked 文件扫描。
 
-- [ ] **步骤 5：运行验证测试**
+- [x] **步骤 5：运行验证测试**
 
 ```powershell
 python -m pytest tests/test_verify_products.py tests/test_verify_core.py tests/test_project_config.py -q
@@ -152,7 +152,7 @@ python -m pytest tests/test_verify_products.py tests/test_verify_core.py tests/t
 
 预期：全部通过。
 
-- [ ] **步骤 6：提交验证门禁**
+- [x] **步骤 6：提交验证门禁**
 
 ```powershell
 git add scripts/verify_products.py scripts/verify_core.py tests/test_verify_products.py tests/test_verify_core.py tests/test_project_config.py .github/workflows/core-offline.yml

@@ -1,4 +1,4 @@
-﻿# 任务 5：实现稳定 JSON 与自包含静态画廊
+# 任务 5：实现稳定 JSON 与自包含静态画廊
 
 ## 操作提示词（可直接复制）
 
@@ -46,7 +46,7 @@ Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NOT_READY
 - 新建：`tests/test_product_json.py`
 - 新建：`tests/test_product_gallery.py`
 
-- [ ] **步骤 1：写 JSON 快照失败测试**
+- [x] **步骤 1：写 JSON 快照失败测试**
 
 创建 `tests/test_product_json.py`：
 
@@ -75,7 +75,7 @@ def test_json_snapshot_has_stable_schema_and_summary() -> None:
     assert payload["products"][0]["product_id"] == "1"
 ```
 
-- [ ] **步骤 2：写画廊结构和安全失败测试**
+- [x] **步骤 2：写画廊结构和安全失败测试**
 
 创建 `tests/test_product_gallery.py`：
 
@@ -131,7 +131,7 @@ def test_gallery_escapes_product_content_before_embedding() -> None:
     assert "\\u003c/script\\u003e" in page
 ```
 
-- [ ] **步骤 3：运行测试确认缺少渲染器**
+- [x] **步骤 3：运行测试确认缺少渲染器**
 
 ```powershell
 python -m pytest tests/test_product_json.py tests/test_product_gallery.py -q
@@ -139,7 +139,7 @@ python -m pytest tests/test_product_json.py tests/test_product_gallery.py -q
 
 预期：缺少两个模块。
 
-- [ ] **步骤 4：实现 JSON 渲染器**
+- [x] **步骤 4：实现 JSON 渲染器**
 
 创建 `app/product_json.py`：
 
@@ -168,7 +168,7 @@ def render_product_json(collection: ProductCollection) -> str:
     ) + "\n"
 ```
 
-- [ ] **步骤 5：实现画廊渲染器**
+- [x] **步骤 5：实现画廊渲染器**
 
 创建 `app/product_gallery.py`，返回完整 `<!doctype html>` 文档。
 
@@ -205,7 +205,7 @@ JS 行为固定为：
 - 来源链接使用 `target="_blank"` 和 `rel="noopener noreferrer"`。
 - 不调用 `fetch()`、XHR、WebSocket 或任何外部脚本。
 
-- [ ] **步骤 6：运行 JSON 和画廊测试**
+- [x] **步骤 6：运行 JSON 和画廊测试**
 
 ```powershell
 python -m pytest tests/test_product_json.py tests/test_product_gallery.py -q
@@ -213,7 +213,7 @@ python -m pytest tests/test_product_json.py tests/test_product_gallery.py -q
 
 预期：全部通过。
 
-- [ ] **步骤 7：提交报告渲染**
+- [x] **步骤 7：提交报告渲染**
 
 ```powershell
 git add app/product_json.py app/product_gallery.py tests/test_product_json.py tests/test_product_gallery.py

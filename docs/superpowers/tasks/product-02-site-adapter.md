@@ -1,4 +1,4 @@
-﻿# 任务 2：实现 web-scraping.dev URL 和页面解析契约
+# 任务 2：实现 web-scraping.dev URL 和页面解析契约
 
 ## 操作提示词（可直接复制）
 
@@ -49,7 +49,7 @@ Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NOT_READY
 - 新建：`tests/fixtures/wsd_product_partial.html`
 - 新建：`tests/fixtures/wsd_product_blocked.html`
 
-- [ ] **步骤 1：创建最小脱敏 fixture**
+- [x] **步骤 1：创建最小脱敏 fixture**
 
 `tests/fixtures/wsd_products_page_1.html`：
 
@@ -129,7 +129,7 @@ Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NOT_READY
 </main>
 ```
 
-- [ ] **步骤 2：写 URL、列表和详情失败测试**
+- [x] **步骤 2：写 URL、列表和详情失败测试**
 
 创建 `tests/test_web_scraping_dev.py`，至少覆盖：
 
@@ -228,7 +228,7 @@ def test_blocked_page_is_detected_before_parsing() -> None:
     assert WebScrapingDevAdapter.is_blocked("", 429, "https://web-scraping.dev/products")
 ```
 
-- [ ] **步骤 3：运行解析测试确认失败**
+- [x] **步骤 3：运行解析测试确认失败**
 
 运行：
 
@@ -238,7 +238,7 @@ python -m pytest tests/test_web_scraping_dev.py -q
 
 预期：缺少 `app.sites.web_scraping_dev`。
 
-- [ ] **步骤 4：实现纯解析和 URL 白名单**
+- [x] **步骤 4：实现纯解析和 URL 白名单**
 
 创建 `app/sites/web_scraping_dev.py`，公开接口固定为：
 
@@ -304,7 +304,7 @@ class WebScrapingDevAdapter:
 - DrissionPage `ContextLostError` 和 `PageDisconnectedError` 复用豆瓣策略：
   适配器立即重试一次，第二次仍失败时转换为 `NetworkError`。
 
-- [ ] **步骤 5：补写浏览器访问测试**
+- [x] **步骤 5：补写浏览器访问测试**
 
 在 `tests/test_web_scraping_dev.py` 增加 fake tab，验证：
 
@@ -328,7 +328,7 @@ def test_fetch_product_navigation_failure_is_network_error() -> None:
         )
 ```
 
-- [ ] **步骤 6：运行适配器测试**
+- [x] **步骤 6：运行适配器测试**
 
 运行：
 
@@ -338,7 +338,7 @@ python -m pytest tests/test_web_scraping_dev.py -q
 
 预期：全部通过。
 
-- [ ] **步骤 7：提交站点适配器**
+- [x] **步骤 7：提交站点适配器**
 
 ```powershell
 git add app/sites/web_scraping_dev.py tests/test_web_scraping_dev.py tests/fixtures/wsd_*.html

@@ -1,4 +1,4 @@
-﻿# 任务 3：实现商品分页运行器和停止策略
+# 任务 3：实现商品分页运行器和停止策略
 
 ## 操作提示词（可直接复制）
 
@@ -44,7 +44,7 @@ Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NOT_READY
 - 新建：`app/product_runner.py`
 - 新建：`tests/test_product_runner.py`
 
-- [ ] **步骤 1：写分页、去重和上限失败测试**
+- [x] **步骤 1：写分页、去重和上限失败测试**
 
 创建 `tests/test_product_runner.py`，使用 fake adapter：
 
@@ -122,7 +122,7 @@ def test_blocked_detail_stops_remaining_products() -> None:
 
 Fake adapter 必须记录所有列表和详情调用，并允许返回对象或抛异常。
 
-- [ ] **步骤 2：运行测试确认缺少运行器**
+- [x] **步骤 2：运行测试确认缺少运行器**
 
 运行：
 
@@ -132,7 +132,7 @@ python -m pytest tests/test_product_runner.py -q
 
 预期：缺少 `app.product_runner`。
 
-- [ ] **步骤 3：实现运行器**
+- [x] **步骤 3：实现运行器**
 
 创建 `app/product_runner.py`，核心结构：
 
@@ -187,7 +187,7 @@ class ProductRunner:
 - 失败诊断沿用 `capture_failure()`，文件名使用 `product-<product_id>`。
 - 日志只包含脱敏后的 `product_id`、阶段和状态。
 
-- [ ] **步骤 4：补齐节流和重试测试**
+- [x] **步骤 4：补齐节流和重试测试**
 
 增加测试验证：
 
@@ -198,7 +198,7 @@ class ProductRunner:
 - 未分类异常错误信息只包含异常类名。
 - `max_products=1` 不访问第二个详情。
 
-- [ ] **步骤 5：运行运行器测试**
+- [x] **步骤 5：运行运行器测试**
 
 运行：
 
@@ -208,7 +208,7 @@ python -m pytest tests/test_product_runner.py -q
 
 预期：全部通过。
 
-- [ ] **步骤 6：提交运行器**
+- [x] **步骤 6：提交运行器**
 
 ```powershell
 git add app/product_runner.py tests/test_product_runner.py

@@ -1,6 +1,6 @@
 # web-scraping.dev 商品采集与可视化画廊实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 接入 `web-scraping.dev` 商品列表和详情页，在严格受控的真实联网门禁下采集最多 10 件商品，并从同一标准商品结果集生成 Excel、JSON 和可离线打开的静态 HTML 画廊。
 
@@ -146,7 +146,7 @@ PRODUCT_COLUMNS = [
 - 修改：`tests/test_project_config.py:21`
 - 测试：`tests/test_project_config.py`
 
-- [ ] **步骤 1：更新精确 `.gitignore` 契约**
+- [x] **步骤 1：更新精确 `.gitignore` 契约**
 
 在期望列表的 `htmlcov/` 与 `.env` 之间加入：
 
@@ -165,7 +165,7 @@ assert not any(
 )
 ```
 
-- [ ] **步骤 2：运行配置测试**
+- [x] **步骤 2：运行配置测试**
 
 运行：
 
@@ -175,7 +175,7 @@ python -m pytest tests/test_project_config.py -q
 
 预期：全部通过；不再出现 `.superpowers/` 列表差异。
 
-- [ ] **步骤 3：运行完整基线**
+- [x] **步骤 3：运行完整基线**
 
 运行：
 
@@ -185,7 +185,7 @@ python -m pytest -q
 
 预期：164 项测试全部通过。
 
-- [ ] **步骤 4：提交基线修复**
+- [x] **步骤 4：提交基线修复**
 
 ```powershell
 git add tests/test_project_config.py
@@ -204,7 +204,7 @@ git commit -m "test: accept ignored brainstorm workspace"
 - 修改：`tests/test_douban_parser.py:8-16`
 - 修改：`tests/test_runner.py:15-25`
 
-- [ ] **步骤 1：先写商品模型失败测试**
+- [x] **步骤 1：先写商品模型失败测试**
 
 创建 `tests/test_product_models.py`：
 
@@ -277,7 +277,7 @@ def test_collection_summary_counts_terminal_groups() -> None:
     assert collection.summary.failed == 1
 ```
 
-- [ ] **步骤 2：运行测试确认缺少模块**
+- [x] **步骤 2：运行测试确认缺少模块**
 
 运行：
 
@@ -287,7 +287,7 @@ python -m pytest tests/test_product_models.py -q
 
 预期：导入 `app.product_models` 失败。
 
-- [ ] **步骤 3：创建共享错误**
+- [x] **步骤 3：创建共享错误**
 
 创建 `app/site_errors.py`：
 
@@ -322,7 +322,7 @@ from app.site_errors import (
 `app/runner.py` 与相关测试也改为从 `app.site_errors` 导入；豆瓣适配器仍可通过
 模块级导入继续暴露相同名字，避免不必要的调用方破坏。
 
-- [ ] **步骤 4：实现商品模型**
+- [x] **步骤 4：实现商品模型**
 
 创建 `app/product_models.py`，包含：
 
@@ -471,7 +471,7 @@ class ProductCollection:
 `success_fixture()` 只作为测试构造器；如果实现者更偏好放在测试辅助模块，可在本任务中
 将其移动到 `tests/product_fixtures.py`，但后续所有测试必须统一使用一个位置。
 
-- [ ] **步骤 5：运行共享错误和模型测试**
+- [x] **步骤 5：运行共享错误和模型测试**
 
 运行：
 
@@ -481,7 +481,7 @@ python -m pytest tests/test_product_models.py tests/test_douban_parser.py tests/
 
 预期：全部通过，豆瓣错误语义没有变化。
 
-- [ ] **步骤 6：提交领域边界**
+- [x] **步骤 6：提交领域边界**
 
 ```powershell
 git add app/site_errors.py app/product_models.py app/sites/douban_movie.py app/runner.py tests/test_product_models.py tests/test_douban_parser.py tests/test_runner.py
@@ -500,7 +500,7 @@ git commit -m "refactor: add shared site errors and product models"
 - 新建：`tests/fixtures/wsd_product_partial.html`
 - 新建：`tests/fixtures/wsd_product_blocked.html`
 
-- [ ] **步骤 1：创建最小脱敏 fixture**
+- [x] **步骤 1：创建最小脱敏 fixture**
 
 `tests/fixtures/wsd_products_page_1.html`：
 
@@ -580,7 +580,7 @@ git commit -m "refactor: add shared site errors and product models"
 </main>
 ```
 
-- [ ] **步骤 2：写 URL、列表和详情失败测试**
+- [x] **步骤 2：写 URL、列表和详情失败测试**
 
 创建 `tests/test_web_scraping_dev.py`，至少覆盖：
 
@@ -679,7 +679,7 @@ def test_blocked_page_is_detected_before_parsing() -> None:
     assert WebScrapingDevAdapter.is_blocked("", 429, "https://web-scraping.dev/products")
 ```
 
-- [ ] **步骤 3：运行解析测试确认失败**
+- [x] **步骤 3：运行解析测试确认失败**
 
 运行：
 
@@ -689,7 +689,7 @@ python -m pytest tests/test_web_scraping_dev.py -q
 
 预期：缺少 `app.sites.web_scraping_dev`。
 
-- [ ] **步骤 4：实现纯解析和 URL 白名单**
+- [x] **步骤 4：实现纯解析和 URL 白名单**
 
 创建 `app/sites/web_scraping_dev.py`，公开接口固定为：
 
@@ -755,7 +755,7 @@ class WebScrapingDevAdapter:
 - DrissionPage `ContextLostError` 和 `PageDisconnectedError` 复用豆瓣策略：
   适配器立即重试一次，第二次仍失败时转换为 `NetworkError`。
 
-- [ ] **步骤 5：补写浏览器访问测试**
+- [x] **步骤 5：补写浏览器访问测试**
 
 在 `tests/test_web_scraping_dev.py` 增加 fake tab，验证：
 
@@ -779,7 +779,7 @@ def test_fetch_product_navigation_failure_is_network_error() -> None:
         )
 ```
 
-- [ ] **步骤 6：运行适配器测试**
+- [x] **步骤 6：运行适配器测试**
 
 运行：
 
@@ -789,7 +789,7 @@ python -m pytest tests/test_web_scraping_dev.py -q
 
 预期：全部通过。
 
-- [ ] **步骤 7：提交站点适配器**
+- [x] **步骤 7：提交站点适配器**
 
 ```powershell
 git add app/sites/web_scraping_dev.py tests/test_web_scraping_dev.py tests/fixtures/wsd_*.html
@@ -803,7 +803,7 @@ git commit -m "feat: add web scraping dev product adapter"
 - 新建：`app/product_runner.py`
 - 新建：`tests/test_product_runner.py`
 
-- [ ] **步骤 1：写分页、去重和上限失败测试**
+- [x] **步骤 1：写分页、去重和上限失败测试**
 
 创建 `tests/test_product_runner.py`，使用 fake adapter：
 
@@ -881,7 +881,7 @@ def test_blocked_detail_stops_remaining_products() -> None:
 
 Fake adapter 必须记录所有列表和详情调用，并允许返回对象或抛异常。
 
-- [ ] **步骤 2：运行测试确认缺少运行器**
+- [x] **步骤 2：运行测试确认缺少运行器**
 
 运行：
 
@@ -891,7 +891,7 @@ python -m pytest tests/test_product_runner.py -q
 
 预期：缺少 `app.product_runner`。
 
-- [ ] **步骤 3：实现运行器**
+- [x] **步骤 3：实现运行器**
 
 创建 `app/product_runner.py`，核心结构：
 
@@ -946,7 +946,7 @@ class ProductRunner:
 - 失败诊断沿用 `capture_failure()`，文件名使用 `product-<product_id>`。
 - 日志只包含脱敏后的 `product_id`、阶段和状态。
 
-- [ ] **步骤 4：补齐节流和重试测试**
+- [x] **步骤 4：补齐节流和重试测试**
 
 增加测试验证：
 
@@ -957,7 +957,7 @@ class ProductRunner:
 - 未分类异常错误信息只包含异常类名。
 - `max_products=1` 不访问第二个详情。
 
-- [ ] **步骤 5：运行运行器测试**
+- [x] **步骤 5：运行运行器测试**
 
 运行：
 
@@ -967,7 +967,7 @@ python -m pytest tests/test_product_runner.py -q
 
 预期：全部通过。
 
-- [ ] **步骤 6：提交运行器**
+- [x] **步骤 6：提交运行器**
 
 ```powershell
 git add app/product_runner.py tests/test_product_runner.py
@@ -981,7 +981,7 @@ git commit -m "feat: collect bounded product pages"
 - 新建：`app/product_excel.py`
 - 新建：`tests/test_product_excel.py`
 
-- [ ] **步骤 1：写工作簿失败测试**
+- [x] **步骤 1：写工作簿失败测试**
 
 创建 `tests/test_product_excel.py`：
 
@@ -1023,7 +1023,7 @@ def test_wrong_existing_schema_is_rejected(tmp_path: Path) -> None:
         ProductExcel.read(path)
 ```
 
-- [ ] **步骤 2：运行测试确认缺少模块**
+- [x] **步骤 2：运行测试确认缺少模块**
 
 ```powershell
 python -m pytest tests/test_product_excel.py -q
@@ -1031,7 +1031,7 @@ python -m pytest tests/test_product_excel.py -q
 
 预期：缺少 `app.product_excel`。
 
-- [ ] **步骤 3：实现商品工作簿**
+- [x] **步骤 3：实现商品工作簿**
 
 创建 `app/product_excel.py`：
 
@@ -1046,7 +1046,7 @@ python -m pytest tests/test_product_excel.py -q
 - 写入调用方提供的暂存路径；目录交换由后续输出包负责。
 - 错误 schema 明确抛 `ValueError`。
 
-- [ ] **步骤 4：运行工作簿测试**
+- [x] **步骤 4：运行工作簿测试**
 
 ```powershell
 python -m pytest tests/test_product_excel.py -q
@@ -1054,7 +1054,7 @@ python -m pytest tests/test_product_excel.py -q
 
 预期：全部通过。
 
-- [ ] **步骤 5：提交 Excel 输出**
+- [x] **步骤 5：提交 Excel 输出**
 
 ```powershell
 git add app/product_excel.py tests/test_product_excel.py
@@ -1070,7 +1070,7 @@ git commit -m "feat: add product workbook output"
 - 新建：`tests/test_product_json.py`
 - 新建：`tests/test_product_gallery.py`
 
-- [ ] **步骤 1：写 JSON 快照失败测试**
+- [x] **步骤 1：写 JSON 快照失败测试**
 
 创建 `tests/test_product_json.py`：
 
@@ -1099,7 +1099,7 @@ def test_json_snapshot_has_stable_schema_and_summary() -> None:
     assert payload["products"][0]["product_id"] == "1"
 ```
 
-- [ ] **步骤 2：写画廊结构和安全失败测试**
+- [x] **步骤 2：写画廊结构和安全失败测试**
 
 创建 `tests/test_product_gallery.py`：
 
@@ -1155,7 +1155,7 @@ def test_gallery_escapes_product_content_before_embedding() -> None:
     assert "\\u003c/script\\u003e" in page
 ```
 
-- [ ] **步骤 3：运行测试确认缺少渲染器**
+- [x] **步骤 3：运行测试确认缺少渲染器**
 
 ```powershell
 python -m pytest tests/test_product_json.py tests/test_product_gallery.py -q
@@ -1163,7 +1163,7 @@ python -m pytest tests/test_product_json.py tests/test_product_gallery.py -q
 
 预期：缺少两个模块。
 
-- [ ] **步骤 4：实现 JSON 渲染器**
+- [x] **步骤 4：实现 JSON 渲染器**
 
 创建 `app/product_json.py`：
 
@@ -1192,7 +1192,7 @@ def render_product_json(collection: ProductCollection) -> str:
     ) + "\n"
 ```
 
-- [ ] **步骤 5：实现画廊渲染器**
+- [x] **步骤 5：实现画廊渲染器**
 
 创建 `app/product_gallery.py`，返回完整 `<!doctype html>` 文档。
 
@@ -1229,7 +1229,7 @@ JS 行为固定为：
 - 来源链接使用 `target="_blank"` 和 `rel="noopener noreferrer"`。
 - 不调用 `fetch()`、XHR、WebSocket 或任何外部脚本。
 
-- [ ] **步骤 6：运行 JSON 和画廊测试**
+- [x] **步骤 6：运行 JSON 和画廊测试**
 
 ```powershell
 python -m pytest tests/test_product_json.py tests/test_product_gallery.py -q
@@ -1237,7 +1237,7 @@ python -m pytest tests/test_product_json.py tests/test_product_gallery.py -q
 
 预期：全部通过。
 
-- [ ] **步骤 7：提交报告渲染**
+- [x] **步骤 7：提交报告渲染**
 
 ```powershell
 git add app/product_json.py app/product_gallery.py tests/test_product_json.py tests/test_product_gallery.py
@@ -1251,7 +1251,7 @@ git commit -m "feat: render product json and gallery"
 - 新建：`app/product_output_bundle.py`
 - 新建：`tests/test_product_output_bundle.py`
 
-- [ ] **步骤 1：写完整输出和回滚失败测试**
+- [x] **步骤 1：写完整输出和回滚失败测试**
 
 创建 `tests/test_product_output_bundle.py`，覆盖：
 
@@ -1318,7 +1318,7 @@ def test_failed_directory_swap_restores_previous_bundle(
     assert (target / "products.json").read_bytes() == original_json
 ```
 
-- [ ] **步骤 2：运行测试确认缺少输出包**
+- [x] **步骤 2：运行测试确认缺少输出包**
 
 ```powershell
 python -m pytest tests/test_product_output_bundle.py -q
@@ -1326,7 +1326,7 @@ python -m pytest tests/test_product_output_bundle.py -q
 
 预期：缺少模块。
 
-- [ ] **步骤 3：实现目录级提交**
+- [x] **步骤 3：实现目录级提交**
 
 创建 `app/product_output_bundle.py`：
 
@@ -1361,7 +1361,7 @@ def read_product_ids(self) -> list[str]:
 
 供测试和后续验证脚本使用。
 
-- [ ] **步骤 4：运行输出包测试**
+- [x] **步骤 4：运行输出包测试**
 
 ```powershell
 python -m pytest tests/test_product_output_bundle.py -q
@@ -1369,7 +1369,7 @@ python -m pytest tests/test_product_output_bundle.py -q
 
 预期：全部通过。
 
-- [ ] **步骤 5：提交原子输出**
+- [x] **步骤 5：提交原子输出**
 
 ```powershell
 git add app/product_output_bundle.py tests/test_product_output_bundle.py
@@ -1384,7 +1384,7 @@ git commit -m "feat: commit product outputs as one bundle"
 - 修改：`tests/test_main.py`
 - 修改：`AGENTS.md`
 
-- [ ] **步骤 1：写 CLI 参数失败测试**
+- [x] **步骤 1：写 CLI 参数失败测试**
 
 在 `tests/test_main.py` 增加：
 
@@ -1406,7 +1406,7 @@ def test_collect_products_parser_has_safe_defaults() -> None:
     assert args.max_products is None
 ```
 
-- [ ] **步骤 2：写浏览器创建前门禁测试**
+- [x] **步骤 2：写浏览器创建前门禁测试**
 
 使用独立 `_FakeProductRunner` 和 `_FakeProductOutputBundle`，验证：
 
@@ -1422,7 +1422,7 @@ def test_collect_products_parser_has_safe_defaults() -> None:
 - 输出锁定返回 4。
 - 浏览器或运行器未分类异常返回 5。
 
-- [ ] **步骤 3：运行新增 CLI 测试确认失败**
+- [x] **步骤 3：运行新增 CLI 测试确认失败**
 
 ```powershell
 python -m pytest tests/test_main.py -q
@@ -1430,7 +1430,7 @@ python -m pytest tests/test_main.py -q
 
 预期：`collect-products` 子命令不存在。
 
-- [ ] **步骤 4：重构命令分派并实现商品门禁**
+- [x] **步骤 4：重构命令分派并实现商品门禁**
 
 在 `app/main.py`：
 
@@ -1484,7 +1484,7 @@ products_parser.add_argument("--max-products", type=int, default=None)
 - blocked 汇总返回 3；`OutputLockedError` 返回 4；
   未分类异常返回 5；验证失败返回 2；成功返回 0。
 
-- [ ] **步骤 5：在 AGENTS.md 固化第二站点规则**
+- [x] **步骤 5：在 AGENTS.md 固化第二站点规则**
 
 增加：
 
@@ -1502,7 +1502,7 @@ products_parser.add_argument("--max-products", type=int, default=None)
 - Never automate protection bypasses.
 ```
 
-- [ ] **步骤 6：运行 CLI 和现有豆瓣测试**
+- [x] **步骤 6：运行 CLI 和现有豆瓣测试**
 
 ```powershell
 python -m pytest tests/test_main.py tests/test_runner.py tests/test_douban_parser.py -q
@@ -1510,7 +1510,7 @@ python -m pytest tests/test_main.py tests/test_runner.py tests/test_douban_parse
 
 预期：全部通过，现有 `run` 参数和退出码保持不变。
 
-- [ ] **步骤 7：提交 CLI 接线**
+- [x] **步骤 7：提交 CLI 接线**
 
 ```powershell
 git add app/main.py tests/test_main.py AGENTS.md
@@ -1528,7 +1528,7 @@ git commit -m "feat: add controlled product collection command"
 - 修改：`tests/test_project_config.py:45-94`
 - 修改：`.github/workflows/core-offline.yml`
 
-- [ ] **步骤 1：写三产物一致性失败测试**
+- [x] **步骤 1：写三产物一致性失败测试**
 
 创建 `tests/test_verify_products.py`，使用测试输出包生成基线，然后验证：
 
@@ -1568,7 +1568,7 @@ def test_verify_bundle_rejects_json_id_mismatch(tmp_path: Path) -> None:
 - HTML 不含对应嵌入 ID；
 - HTML 含 `<script src=`、`fetch(` 或外部字体。
 
-- [ ] **步骤 2：实现 `scripts/verify_products.py`**
+- [x] **步骤 2：实现 `scripts/verify_products.py`**
 
 公开：
 
@@ -1596,7 +1596,7 @@ CLI：
 python -m scripts.verify_products --output-dir .\outputs\web-scraping-dev-demo
 ```
 
-- [ ] **步骤 3：扩展覆盖率门禁**
+- [x] **步骤 3：扩展覆盖率门禁**
 
 在 `scripts/verify_core.py`：
 
@@ -1612,7 +1612,7 @@ REQUIRED_COVERAGE = {
 
 更新 `tests/test_verify_core.py` 的平台路径、通过和失败用例。
 
-- [ ] **步骤 4：强化 CI 静态保护**
+- [x] **步骤 4：强化 CI 静态保护**
 
 更新 `tests/test_project_config.py`：
 
@@ -1624,7 +1624,7 @@ REQUIRED_COVERAGE = {
 更新 `.github/workflows/core-offline.yml` 顶部注释，明确第二站点也禁止真实访问。
 工作流执行步骤仍只有安装、pytest、覆盖率门禁、diff 检查和 tracked 文件扫描。
 
-- [ ] **步骤 5：运行验证测试**
+- [x] **步骤 5：运行验证测试**
 
 ```powershell
 python -m pytest tests/test_verify_products.py tests/test_verify_core.py tests/test_project_config.py -q
@@ -1632,7 +1632,7 @@ python -m pytest tests/test_verify_products.py tests/test_verify_core.py tests/t
 
 预期：全部通过。
 
-- [ ] **步骤 6：提交验证门禁**
+- [x] **步骤 6：提交验证门禁**
 
 ```powershell
 git add scripts/verify_products.py scripts/verify_core.py tests/test_verify_products.py tests/test_verify_core.py tests/test_project_config.py .github/workflows/core-offline.yml
@@ -1647,7 +1647,7 @@ git commit -m "test: verify offline product output contract"
 - 修改：`tests/test_project_config.py`
 - 修改：`pyproject.toml`（仅在包发现测试表明新模块未安装时）
 
-- [ ] **步骤 1：写 README 契约测试**
+- [x] **步骤 1：写 README 契约测试**
 
 在 `tests/test_project_config.py` 增加：
 
@@ -1667,7 +1667,7 @@ def test_readme_documents_product_collection_gate_and_gallery() -> None:
         assert required in readme
 ```
 
-- [ ] **步骤 2：更新 README**
+- [x] **步骤 2：更新 README**
 
 新增独立章节，包含：
 
@@ -1695,7 +1695,7 @@ python -m app.main collect-products `
 9. CI 只做离线 fixture 测试；
 10. 输出、profile、日志和诊断文件不进入 Git。
 
-- [ ] **步骤 3：验证安装后的模块发现**
+- [x] **步骤 3：验证安装后的模块发现**
 
 运行：
 
@@ -1720,7 +1720,7 @@ include = ["app*"]
 
 随后重新运行导入测试。
 
-- [ ] **步骤 4：运行全量离线测试和覆盖率**
+- [x] **步骤 4：运行全量离线测试和覆盖率**
 
 ```powershell
 python -m pytest --cov=app --cov-report=json:coverage.json --cov-report=term-missing -q
@@ -1736,7 +1736,7 @@ git diff --check
 - `pip check` 无依赖冲突；
 - `git diff --check` 无错误。
 
-- [ ] **步骤 5：生成完全离线的演示包用于验证**
+- [x] **步骤 5：生成完全离线的演示包用于验证**
 
 在测试临时目录使用 fixture 和 `ProductOutputBundle` 生成演示包，不访问真实网站：
 
@@ -1746,7 +1746,7 @@ python -m pytest tests/test_product_output_bundle.py tests/test_product_gallery.
 
 随后通过测试中生成的临时文件验证结构；不要把临时输出复制到 Git 跟踪目录。
 
-- [ ] **步骤 6：人工打开静态画廊**
+- [x] **步骤 6：人工打开静态画廊**
 
 使用由 fixture 构造的本地 `gallery.html`，人工检查：
 
@@ -1760,7 +1760,7 @@ python -m pytest tests/test_product_output_bundle.py tests/test_product_gallery.
 
 这一步只验证本地 HTML，不执行真实采集。
 
-- [ ] **步骤 7：提交文档和交付收口**
+- [x] **步骤 7：提交文档和交付收口**
 
 ```powershell
 git add README.md tests/test_project_config.py pyproject.toml
@@ -1778,7 +1778,7 @@ git commit -m "docs: add product collection gallery runbook"
 - 浏览器 profile：`browser-profile/web-scraping-dev/`（忽略，不提交）
 - 诊断：`artifacts/`（忽略，不提交）
 
-- [ ] **步骤 1：运行最终离线发布门禁**
+- [x] **步骤 1：运行最终离线发布门禁**
 
 ```powershell
 python -m pytest --cov=app --cov-report=json:coverage.json --cov-report=term-missing -q
@@ -1797,7 +1797,7 @@ git status --short
 - 无依赖冲突和空白错误；
 - `git status` 只显示本轮预期文件或已忽略运行时产物。
 
-- [ ] **步骤 2：确认禁止的 tracked 产物为空**
+- [x] **步骤 2：确认禁止的 tracked 产物为空**
 
 ```powershell
 git ls-files browser-profile outputs artifacts .superpowers
@@ -1813,7 +1813,7 @@ outputs/.gitkeep
 
 `.superpowers/` 不应有 tracked 文件。
 
-- [ ] **步骤 3：仅在操作者再次明确批准时运行真实网站**
+- [x] **步骤 3：仅在操作者再次明确批准时运行真实网站**
 
 本计划、设计批准或历史授权都不等于本次真实联网授权。
 只有操作者在执行时明确要求 live run，才运行：
@@ -1837,7 +1837,7 @@ python -m app.main collect-products `
 - 遇到 429、阻断、登录、安全检查、挑战或站外跳转立即停止；
 - 不降低间隔，不增加商品上限，不自动重试阻断状态。
 
-- [ ] **步骤 4：若已获授权且运行成功，验证输出包**
+- [x] **步骤 4：若已获授权且运行成功，验证输出包**
 
 ```powershell
 python -m scripts.verify_products `
@@ -1851,7 +1851,7 @@ python -m scripts.verify_products `
 - Excel、JSON、HTML 数量和顺序一致；
 - HTML 无自动网络依赖。
 
-- [ ] **步骤 5：人工验收画廊**
+- [x] **步骤 5：人工验收画廊**
 
 打开：
 
@@ -1868,7 +1868,7 @@ outputs/web-scraping-dev-demo/gallery.html
 - `PARTIAL` 或失败记录显示原因；
 - 页面加载后不自动访问目标站。
 
-- [ ] **步骤 6：最终提交**
+- [x] **步骤 6：最终提交**
 
 只有离线门禁全部通过后：
 
@@ -1886,15 +1886,15 @@ git commit -m "chore: finalize product gallery release gate"
 
 ## 计划自我复核清单
 
-- [ ] 每项批准需求都有对应任务：
+- [x] 每项批准需求都有对应任务：
   第二站点、分页、详情、10 件上限、2 秒间隔、Excel、JSON、HTML、
   搜索、筛选、排序、证据侧栏、离线 CI 和阻断停止。
-- [ ] 商品模型没有复用或改变电影 12 列契约。
-- [ ] `ProductStatus.PARTIAL` 只用于可选字段缺失。
-- [ ] 商品 ID、名称、当前价格或规范 URL 缺失时为 `PAGE_CHANGED`。
-- [ ] 输出包通过暂存目录和目录交换保持三产物一致。
-- [ ] 所有真实联网命令都包含明确授权、数量上限、有头模式和最小间隔。
-- [ ] 没有任务实现登录、GraphQL、评论、购物车、CSRF、挑战或绕过。
-- [ ] CI 没有真实网站、浏览器或 live flag。
-- [ ] 所有代码修改先有失败测试，再有最小实现和通过命令。
-- [ ] 每个任务都有独立提交点。
+- [x] 商品模型没有复用或改变电影 12 列契约。
+- [x] `ProductStatus.PARTIAL` 只用于可选字段缺失。
+- [x] 商品 ID、名称、当前价格或规范 URL 缺失时为 `PAGE_CHANGED`。
+- [x] 输出包通过暂存目录和目录交换保持三产物一致。
+- [x] 所有真实联网命令都包含明确授权、数量上限、有头模式和最小间隔。
+- [x] 没有任务实现登录、GraphQL、评论、购物车、CSRF、挑战或绕过。
+- [x] CI 没有真实网站、浏览器或 live flag。
+- [x] 所有代码修改先有失败测试，再有最小实现和通过命令。
+- [x] 每个任务都有独立提交点。

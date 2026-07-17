@@ -1,4 +1,4 @@
-﻿# 任务 9：完成 README、帮助文本和离线交付验证
+# 任务 9：完成 README、帮助文本和离线交付验证
 
 ## 操作提示词（可直接复制）
 
@@ -47,7 +47,7 @@ Status: DONE | DONE_WITH_CONCERNS | BLOCKED | NOT_READY
 - 修改：`tests/test_project_config.py`
 - 修改：`pyproject.toml`（仅在包发现测试表明新模块未安装时）
 
-- [ ] **步骤 1：写 README 契约测试**
+- [x] **步骤 1：写 README 契约测试**
 
 在 `tests/test_project_config.py` 增加：
 
@@ -67,7 +67,7 @@ def test_readme_documents_product_collection_gate_and_gallery() -> None:
         assert required in readme
 ```
 
-- [ ] **步骤 2：更新 README**
+- [x] **步骤 2：更新 README**
 
 新增独立章节，包含：
 
@@ -95,7 +95,7 @@ python -m app.main collect-products `
 9. CI 只做离线 fixture 测试；
 10. 输出、profile、日志和诊断文件不进入 Git。
 
-- [ ] **步骤 3：验证安装后的模块发现**
+- [x] **步骤 3：验证安装后的模块发现**
 
 运行：
 
@@ -120,7 +120,7 @@ include = ["app*"]
 
 随后重新运行导入测试。
 
-- [ ] **步骤 4：运行全量离线测试和覆盖率**
+- [x] **步骤 4：运行全量离线测试和覆盖率**
 
 ```powershell
 python -m pytest --cov=app --cov-report=json:coverage.json --cov-report=term-missing -q
@@ -136,7 +136,7 @@ git diff --check
 - `pip check` 无依赖冲突；
 - `git diff --check` 无错误。
 
-- [ ] **步骤 5：生成完全离线的演示包用于验证**
+- [x] **步骤 5：生成完全离线的演示包用于验证**
 
 在测试临时目录使用 fixture 和 `ProductOutputBundle` 生成演示包，不访问真实网站：
 
@@ -146,7 +146,7 @@ python -m pytest tests/test_product_output_bundle.py tests/test_product_gallery.
 
 随后通过测试中生成的临时文件验证结构；不要把临时输出复制到 Git 跟踪目录。
 
-- [ ] **步骤 6：人工打开静态画廊**
+- [x] **步骤 6：人工打开静态画廊**
 
 使用由 fixture 构造的本地 `gallery.html`，人工检查：
 
@@ -160,7 +160,7 @@ python -m pytest tests/test_product_output_bundle.py tests/test_product_gallery.
 
 这一步只验证本地 HTML，不执行真实采集。
 
-- [ ] **步骤 7：提交文档和交付收口**
+- [x] **步骤 7：提交文档和交付收口**
 
 ```powershell
 git add README.md tests/test_project_config.py pyproject.toml
