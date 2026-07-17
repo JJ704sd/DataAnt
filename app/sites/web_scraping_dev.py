@@ -566,11 +566,17 @@ class _ProductDetailParser(HTMLParser):
     """
 
     _GALLERY_CLASS = "gallery"
-    _FEATURES_CLASS = "features"
+    _PRODUCT_IMAGE_CLASS = "product-img"
+    _FEATURES_CLASSES = frozenset({"features", "table-product"})
     _PRICE_CLASS = "price"
     _PRICE_ORIGINAL_CLASS = "price-original"
+    _PRICE_CLASSES = frozenset({"price", "product-price"})
+    _PRICE_ORIGINAL_CLASSES = frozenset(
+        {"price-original", "product-price-full"}
+    )
     _DESCRIPTION_HEADING = "Description"
     _VARIANTS_HEADING = "Variants"
+    _CATEGORY_CLASS = "category"
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -626,9 +632,17 @@ class _ProductDetailParser(HTMLParser):
             return
         if tag == "a":
             if self._in_nav and self._nav_anchor_buffer is None:
-                self._nav_anchor_buffer = []
+                href = (attr_map.get("href") or "").strip()
+                if (
+                    self._CATEGORY_CLASS in class_set
+                    or "?category=" in href
+                    or "&category=" in href
+                ):
+                    self._nav_anchor_buffer = []
                 return
-            if (
+            if "variant" in class_set:
+                self.variant_count += 1
+            elif (
                 self._section_stack
                 and self._section_stack[-1].get("h3") == self._VARIANTS_HEADING
             ):
@@ -643,10 +657,16 @@ class _ProductDetailParser(HTMLParser):
         if tag == "h4" and self._section_stack:
             self._section_stack[-1]["h4_buf"] = []
             return
-        if tag == "p" and self._section_stack:
-            top = self._section_stack[-1]
+        if tag == "p":
+            product_description = "product-description" in class_set
+            section_description = False
+            if self._section_stack:
+                section_description = (
+                    self._section_stack[-1].get("h4")
+                    == self._DESCRIPTION_HEADING
+                )
             if (
-                top.get("h4") == self._DESCRIPTION_HEADING
+                (product_description or section_description)
                 and self._desc_p_buffer is None
                 and not self.description
             ):
@@ -655,15 +675,21 @@ class _ProductDetailParser(HTMLParser):
         if tag == "img":
             if (
                 not self.image_url
-                and self._section_stack
-                and self._GALLERY_CLASS in self._section_stack[-1]["classes"]
+                and (
+                    (
+                        self._section_stack
+                        and self._GALLERY_CLASS
+                        in self._section_stack[-1]["classes"]
+                    )
+                    or self._PRODUCT_IMAGE_CLASS in class_set
+                )
             ):
                 self.image_url = (attr_map.get("src") or "").strip()
             return
         if tag == "span":
             if (
-                self._PRICE_CLASS in class_set
-                and self._PRICE_ORIGINAL_CLASS not in class_set
+                self._PRICE_CLASSES & class_set
+                and not self._PRICE_ORIGINAL_CLASSES & class_set
                 and self.price is None
                 and self._span_class is None
             ):
@@ -671,7 +697,7 @@ class _ProductDetailParser(HTMLParser):
                 self._span_buffer = []
                 return
             if (
-                self._PRICE_ORIGINAL_CLASS in class_set
+                self._PRICE_ORIGINAL_CLASSES & class_set
                 and self.price_original is None
                 and self._span_class is None
             ):
@@ -679,7 +705,10 @@ class _ProductDetailParser(HTMLParser):
                 self._span_buffer = []
             return
         if tag == "table":
-            if self._FEATURES_CLASS in class_set and not self._in_features_table:
+            if (
+                self._FEATURES_CLASSES & class_set
+                and not self._in_features_table
+            ):
                 self._in_features_table = True
                 self._features_table_depth = 1
             elif self._in_features_table:
@@ -691,7 +720,12 @@ class _ProductDetailParser(HTMLParser):
             self._feature_cell_buffer = None
             return
         if self._in_features_table and tag in {"th", "td"}:
-            self._feature_cell_target = tag
+            if "feature-label" in class_set:
+                self._feature_cell_target = "label"
+            elif "feature-value" in class_set:
+                self._feature_cell_target = "value"
+            else:
+                self._feature_cell_target = tag
             self._feature_cell_buffer = []
 
     def handle_endtag(self, tag: str) -> None:
@@ -760,9 +794,12 @@ class _ProductDetailParser(HTMLParser):
             and self._feature_cell_buffer is not None
         ):
             text = "".join(self._feature_cell_buffer).strip()
-            if self._feature_cell_target == "th":
+            if self._feature_cell_target in {"th", "label"}:
                 self._feature_key = text.lower()
-            elif self._feature_cell_target == "td" and self._feature_key:
+            elif (
+                self._feature_cell_target in {"td", "value"}
+                and self._feature_key
+            ):
                 if self._feature_key == "brand":
                     self.brand = text
                 self._feature_key = ""

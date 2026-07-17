@@ -210,6 +210,8 @@ class ProductRunner:
                 listing.product_id,
                 record.status.value,
             )
+        if record.status in _CAPTURE_STATUSES:
+            self._capture(listing)
         return record, False
 
     def _on_blocked(

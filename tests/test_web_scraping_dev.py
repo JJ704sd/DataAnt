@@ -105,6 +105,27 @@ def test_parse_detail_extracts_required_and_optional_fields() -> None:
     assert record.category == "consumables"
 
 
+def test_parse_detail_extracts_live_product_shape() -> None:
+    listing = ProductListing(
+        "1", "https://web-scraping.dev/product/1", "consumables"
+    )
+    record = WebScrapingDevAdapter.parse_detail_html(
+        html("wsd_product_live_shape.html"),
+        listing,
+        listing.product_url,
+    )
+    assert record.status is ProductStatus.SUCCESS
+    assert record.current_price == Decimal("9.99")
+    assert record.original_price == Decimal("12.99")
+    assert record.primary_image_url.endswith(
+        "/assets/products/orange-chocolate-box-small-1.webp"
+    )
+    assert record.variant_count == 2
+    assert record.brand == "ChocoDelight"
+    assert record.description == "A chocolate assortment."
+    assert record.category == "consumables"
+
+
 def test_missing_optional_fields_returns_partial() -> None:
     listing = ProductListing(
         "4", "https://web-scraping.dev/product/4", "consumables"

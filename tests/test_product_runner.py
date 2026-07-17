@@ -103,6 +103,13 @@ class FakeAdapter:
         return _default_record(listing.product_id)
 
 
+class DiagnosticTab:
+    html = "<main><h3>Product 1</h3><p>price moved</p></main>"
+
+    def get_screenshot(self, **kwargs) -> None:
+        return None
+
+
 # --------------------------------------------------------------------------- #
 # Step 1: pagination, deduplication, and limit
 # --------------------------------------------------------------------------- #
@@ -367,3 +374,27 @@ def test_max_products_one_does_not_visit_second_detail(
 
     assert [r.product_id for r in collection.records] == ["1"]
     assert adapter.product_calls == ["1"]
+
+
+def test_page_changed_record_captures_html_diagnostic(tmp_path) -> None:
+    listing = ProductListing(
+        "1", "https://web-scraping.dev/product/1", "consumables"
+    )
+    changed = ProductRecord.failure(
+        listing,
+        ProductStatus.PAGE_CHANGED,
+        "Missing required detail fields: current_price",
+    )
+    adapter = FakeAdapter.single_page("1")
+    adapter.products["1"] = changed
+
+    ProductRunner(
+        adapter,
+        DiagnosticTab(),
+        max_products=1,
+        min_interval_seconds=0,
+        artifacts_dir=tmp_path,
+    ).run()
+
+    snapshot = tmp_path / "product-1.html"
+    assert snapshot.read_text(encoding="utf-8") == DiagnosticTab.html
