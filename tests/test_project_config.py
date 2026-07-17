@@ -29,6 +29,7 @@ def test_browser_profile_placeholder_matches_gitignore_rules() -> None:
         ".pytest_cache/",
         ".coverage",
         "htmlcov/",
+        ".superpowers/",
         ".env",
         "browser-profile/*",
         "!browser-profile/.gitkeep",
@@ -40,6 +41,12 @@ def test_browser_profile_placeholder_matches_gitignore_rules() -> None:
     assert all("playwright/.auth" not in rule.casefold() for rule in gitignore)
     assert (PROJECT_ROOT / "browser-profile" / ".gitkeep").is_file()
     assert not (PROJECT_ROOT / "playwright" / ".auth" / ".gitkeep").exists()
+    assert ".superpowers/" in gitignore
+    assert not any(
+        path.parts[:2] == (".superpowers", "brainstorm")
+        for path in PROJECT_ROOT.rglob("*")
+        if path.is_file() and path.name == ".gitkeep"
+    )
 
 
 def test_core_ci_is_offline_and_runs_portable_verification() -> None:
