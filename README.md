@@ -270,7 +270,31 @@ python -m app.main collect-products `
 
 输出被 Excel 占用时返回 `OUTPUT_LOCKED` 语义（退出码 4），不覆盖也不损坏旧文件。任何单个输出器失败都不会产生彼此不一致的产物。
 
-### 8.4 打开静态画廊（本地，无网络）
+### 8.4 本地性能与清理
+
+三件套在落地 `target_dir` 之前先写到 sibling staging 目录，原子 rename 才把三个文件一次性呈现为同一份 `ProductCollection`；live 访问始终是**单 tab 串行**且受 `--min-interval 2` 节流（web-scraping.dev）与 `--min-interval 5` 节流（豆瓣），**不**做多 tab、多浏览器、多进程 live 抓取，也不做降速绕过。本地最多开 **3 个 writer 线程**并发生成 `products.xlsx` / `products.json` / `gallery.html`（`product_rows` 复用同一份 primitive rows，不二次 `to_primitive()`），JSON 改用 compact `separators=(",", ":")` 但 `schema_version=1` 不变，跨产物一致性由 `BundleWriteReceipt(product_ids, excel, bytes_by_file)` 校验。
+
+可重复的离线性能与清理工具：
+
+```powershell
+# 离线 benchmark：仅用 tests/fixtures + tests/helpers_product_performance.py fixture
+# 不启浏览器、不访问网络、stdout 输出 JSON 报告
+& .\.venv\Scripts\python.exe -m scripts.benchmark_products --counts 1,5,10 --iterations 5
+
+# artifacts 清理：默认 DRY-RUN，只 --apply 才真删
+# validate_artifacts_root hard-block 仓库外 root，越界直接抛 ValueError
+& .\.venv\Scripts\python.exe -m scripts.prune_artifacts --root .\artifacts --older-than-days 7
+```
+
+要点：
+
+- `scripts.benchmark_products` **不**实例化 `BrowserSession`、不调用 `tab.get()`、不访问真实网络；峰值 `max_queue_depth <= 2`、`writer_workers == 3`、`parser_workers == 2`。
+- `scripts.prune_artifacts` 默认 DRY-RUN 列出候选文件；只有 `--apply` 才执行删除；root 必须解析到 `<repo>/artifacts`，其它路径直接拒绝；跳过 `.gitkeep` 占位符，**不**删除目录本身。
+- `bundle.write()` 头部会先调 `cleanup_stale_siblings(max_age_seconds=24h)` 回收陈旧 staging/backup sibling（**只**匹配本 task 生成的 `.{name}.staging-*` / `.{name}.backup-*` 命名），不删 `.venv/`、`.worktrees/` 或任何未跟踪目录；本轮 finally 仍即时清理自己的 staging。
+- 网络等待（`--min-interval` sleep、live fetch 阻塞）**不**算本地优化指标；`ProductRunMetrics` 只统计 `paced_operations / network_retry_count / detail_records / discovery_seconds / detail_seconds` 与 `local_output_ms / writers / records / bundle_bytes`，日志里**不**出现 HTML、Cookie、请求头、profile 路径、API Key。
+- `git diff --check` 在每次 commit 前必须无输出；`outputs/`、`artifacts/`、`browser-profile/` 在仓库里**只**保留 `.gitkeep` 占位符。
+
+### 8.5 打开静态画廊（本地，无网络）
 
 ```powershell
 # 推荐：用默认浏览器直接打开
@@ -286,7 +310,7 @@ explorer .\outputs\web-scraping-dev-demo\gallery.html
 - 页面加载完成后 Network 面板**无任何自动请求**到 `web-scraping.dev`、CDN 或外部域名；
 - 商品卡片封面始终由内置 CSS/SVG 按分类和名称**本地**生成，不下载任何远程图片。
 
-### 8.5 画廊交互能力
+### 8.6 画廊交互能力
 
 `gallery.html` 在纯 HTML + CSS + 原生 JavaScript 下提供以下能力，**不**依赖任何 CDN、字体或前端框架：
 
@@ -298,7 +322,7 @@ explorer .\outputs\web-scraping-dev-demo\gallery.html
 - 窄屏下卡片网格自动折叠为单列，侧栏始终可读；
 - 失败商品仍以卡片形式展示，并在侧栏明确写出 `error_message`。
 
-### 8.6 状态与故障处置
+### 8.7 状态与故障处置
 
 | 状态 | 含义 | 推荐处置 | CLI 退出码 |
 | ---- | ---- | -------- | ---------- |
@@ -315,7 +339,7 @@ explorer .\outputs\web-scraping-dev-demo\gallery.html
 - 失败记录仍进入 `products.xlsx` / `products.json` / `gallery.html`，保留 `product_id`、来源 URL、状态、错误信息与采集时间，**不**为缺失字段编造默认值。
 - 任何状态都不修改豆瓣电影 12 列 schema、不复用 `movies` 工作表。
 
-### 8.7 立即停止条件
+### 8.8 立即停止条件
 
 下列任意一种命中，适配器立即抛错、运行器立即终止本批，**不**做代理、验证码识别、Cookie 注入、降速绕过等任何形式的“再试一次”：
 
@@ -327,13 +351,13 @@ explorer .\outputs\web-scraping-dev-demo\gallery.html
 - 命中 `/robots-disallowed` 等 robots 禁止路径；
 - 连续多页表明适配器已失效。
 
-### 8.8 CI 与离线验收
+### 8.9 CI 与离线验收
 
 - CI（`.github/workflows/core-offline.yml`）**只**做离线 fixture 测试：跑全量 `pytest`、跑 `scripts.verify_core` 覆盖率门禁、跑 `pip check`、跑 `git diff --check`。**不**启动浏览器、**不**访问 `web-scraping.dev`、**不**生成或上传 `products.xlsx` / `products.json` / `gallery.html`。
 - 验收离线产物时直接跑 `python -m pytest tests/test_product_output_bundle.py tests/test_product_gallery.py -q`，使用 fixture 在临时目录构造 `products.xlsx` / `products.json` / `gallery.html`；不要把临时文件复制到 Git 跟踪目录。
 - 人工受控验收必须显式传 `--live-approved --max-products N`，有头浏览器运行、至少跨两个列表分页、间隔 `>= 2` 秒；至少要核对三个产物的商品数与 `product_id` 完全一致。
 
-### 8.9 永不提交
+### 8.10 永不提交
 
 `outputs/`、`browser-profile/`、`artifacts/`、日志、截图、HTML 证据、API Key、Cookie、请求头、用户身份相关字段一律**不**进 Git。`.gitignore` 已托管上述路径，本节新增的 `outputs/web-scraping-dev-demo/`、`browser-profile/web-scraping-dev/` 也只保留 `.gitkeep` 占位。提交前 `git diff --name-only` 应只看到本任务批准的 `README.md`、`tests/test_project_config.py`（必要时加上 `pyproject.toml`）。
 

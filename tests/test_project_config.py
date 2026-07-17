@@ -178,3 +178,17 @@ def test_readme_documents_product_collection_gate_and_gallery() -> None:
         "/robots-disallowed",
     ):
         assert required in readme
+
+
+def test_readme_documents_product_performance_controls() -> None:
+    readme = (PROJECT_ROOT / "README.md").read_text(encoding="utf-8")
+    for required in (
+        "scripts.benchmark_products",
+        "scripts.prune_artifacts",
+        "--live-approved",
+        "--min-interval 2",
+    ):
+        assert required in readme, f"README must document {required!r}"
+    assert "多 tab" in readme or "多浏览器" in readme, (
+        "README must explicitly forbid multi-tab / multi-browser live scraping"
+    )
