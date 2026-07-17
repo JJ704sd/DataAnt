@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 
@@ -27,6 +29,13 @@ PRODUCT_COLUMNS: list[str] = [
 ]
 
 
+@dataclass(frozen=True, slots=True)
+class ProductWriteReceipt:
+    product_ids: tuple[str, ...]
+    row_count: int
+    bytes_written: int
+
+
 class ProductExcel:
     """Workbook I/O for the bounded product gallery.
 
@@ -46,12 +55,31 @@ class ProductExcel:
         return workbook, sheet
 
     @classmethod
-    def write(cls, path: Path, records: list[ProductRecord]) -> None:
+    def write(
+        cls,
+        path: Path,
+        records: list[ProductRecord],
+        *,
+        primitive_rows: Sequence[Mapping[str, object]] | None = None,
+    ) -> ProductWriteReceipt:
         path.parent.mkdir(parents=True, exist_ok=True)
+        rows: tuple[Mapping[str, object], ...] = (
+            tuple(record.to_primitive() for record in records)
+            if primitive_rows is None
+            else tuple(primitive_rows)
+        )
+        if len(rows) != len(records):
+            raise ValueError("primitive rows must match records")
+
         workbook, sheet = cls._workbook_for(path)
-        for record in records:
-            sheet.append(cls._row_for(record))
+        for row in rows:
+            sheet.append([row[column] for column in PRODUCT_COLUMNS])
         workbook.save(path)
+        return ProductWriteReceipt(
+            product_ids=tuple(record.product_id for record in records),
+            row_count=len(records),
+            bytes_written=path.stat().st_size,
+        )
 
     @classmethod
     def read(cls, path: Path) -> list[ProductRecord]:

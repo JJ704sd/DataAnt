@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 from openpyxl import Workbook, load_workbook
 
-from app.product_excel import PRODUCT_COLUMNS, ProductExcel
+from app.product_excel import PRODUCT_COLUMNS, ProductExcel, ProductWriteReceipt
 from app.product_models import ProductRecord
 
 
@@ -16,6 +16,32 @@ def test_render_creates_products_sheet_with_exact_columns(tmp_path: Path) -> Non
     assert list(rows[0]) == PRODUCT_COLUMNS
     assert rows[1][0] == "1"
     assert rows[1][12] == "SUCCESS"
+
+
+def test_write_accepts_shared_rows_and_returns_receipt(tmp_path: Path) -> None:
+    path = tmp_path / "products.xlsx"
+    record = ProductRecord.success_fixture("1")
+
+    receipt = ProductExcel.write(
+        path,
+        [record],
+        primitive_rows=(record.to_primitive(),),
+    )
+
+    assert isinstance(receipt, ProductWriteReceipt)
+    assert receipt.product_ids == ("1",)
+    assert receipt.row_count == 1
+    assert receipt.bytes_written == path.stat().st_size
+
+
+def test_write_rejects_shared_row_length_mismatch(tmp_path: Path) -> None:
+    path = tmp_path / "products.xlsx"
+    with pytest.raises(ValueError, match="primitive rows"):
+        ProductExcel.write(
+            path,
+            [ProductRecord.success_fixture("1")],
+            primitive_rows=(),
+        )
 
 
 def test_merge_replaces_product_id_without_duplicate(tmp_path: Path) -> None:

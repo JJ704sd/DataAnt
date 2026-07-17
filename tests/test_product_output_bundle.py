@@ -58,3 +58,20 @@ def test_failed_directory_swap_restores_previous_bundle(
         bundle.write(collection("2"))
 
     assert (target / "products.json").read_bytes() == original_json
+
+
+def test_bundle_passes_shared_rows_to_excel(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    received: list[tuple[object, ...]] = []
+    original = bundle_module.ProductExcel.write
+
+    def capture(path, records, *, primitive_rows=None):
+        received.append(tuple(primitive_rows or ()))
+        return original(path, records, primitive_rows=primitive_rows)
+
+    monkeypatch.setattr(bundle_module.ProductExcel, "write", capture)
+    bundle_module.ProductOutputBundle(tmp_path / "demo").write(collection("1"))
+
+    assert len(received) == 1
+    assert received[0][0]["product_id"] == "1"
