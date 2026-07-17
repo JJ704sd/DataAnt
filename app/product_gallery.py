@@ -5,7 +5,10 @@ import json
 from datetime import datetime
 from typing import Final
 
-from app.product_json import product_payload
+from app.product_json import (
+    ProductOutputSnapshot,
+    build_product_output_snapshot,
+)
 from app.product_models import ProductCollection, ProductRecord, ProductStatus
 
 
@@ -1016,9 +1019,15 @@ header.page-header .source {
 """
 
 
-def render_gallery(collection: ProductCollection) -> str:
+def render_gallery(
+    collection: ProductCollection,
+    *,
+    snapshot: ProductOutputSnapshot | None = None,
+) -> str:
+    output_snapshot = snapshot or build_product_output_snapshot(collection)
+    payload = output_snapshot.payload
     embedded = (
-        json.dumps(product_payload(collection), ensure_ascii=False)
+        json.dumps(payload, ensure_ascii=False)
         .replace("<", "\\u003c")
         .replace(">", "\\u003e")
         .replace("&", "\\u0026")

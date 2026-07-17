@@ -225,3 +225,24 @@ def test_gallery_preserves_timestamp_words_in_evidence_rows() -> None:
     page = quality_gallery()
 
     assert ".evidence-panel .row .val.timestamp" in page
+
+
+def test_gallery_uses_supplied_snapshot(monkeypatch) -> None:
+    from app.product_json import build_product_output_snapshot
+
+    collection = ProductCollection.from_records(
+        [ProductRecord.success_fixture("1")],
+        generated_at="2026-07-16T20:00:00+08:00",
+        blocked=False,
+    )
+    snapshot = build_product_output_snapshot(collection)
+    monkeypatch.setattr(
+        "app.product_gallery.build_product_output_snapshot",
+        lambda _collection: (_ for _ in ()).throw(
+            AssertionError("gallery rebuilt payload")
+        ),
+    )
+
+    page = render_gallery(collection, snapshot=snapshot)
+
+    assert '"product_id": "1"' in page
