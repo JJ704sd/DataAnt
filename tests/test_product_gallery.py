@@ -1,5 +1,6 @@
 from dataclasses import replace
 
+from app.product_json import build_product_output_snapshot
 from app.product_gallery import render_gallery
 from app.product_models import (
     ProductCollection,
@@ -87,7 +88,7 @@ def test_gallery_embeds_data_without_external_script_or_font_dependencies() -> N
         "WebSocket",
     ):
         assert forbidden not in page
-    assert '"product_id": "1"' in page
+    assert '"product_id":"1"' in page
 
 
 def test_gallery_escapes_product_content_before_embedding() -> None:
@@ -170,7 +171,7 @@ def test_gallery_preserves_placeholder_like_product_values() -> None:
 
     page = render_gallery(collection)
 
-    assert '"name": "__TOTAL__"' in page
+    assert '"name":"__TOTAL__"' in page
 
 
 def test_gallery_validates_source_links_before_creating_evidence_href() -> None:
@@ -186,7 +187,7 @@ def test_gallery_validates_source_links_before_creating_evidence_href() -> None:
 
     page = render_gallery(collection)
 
-    assert '"product_url": "javascript:alert(1)"' in page
+    assert '"product_url":"javascript:alert(1)"' in page
     assert "function safeSourceUrl(value)" in page
     assert "var safeLink = safeSourceUrl(value);" in page
 
@@ -209,7 +210,7 @@ def test_gallery_falls_back_when_a_failed_record_has_no_reason() -> None:
 
     page = render_gallery(collection)
 
-    assert '"error_message": ""' in page
+    assert '"error_message":""' in page
     assert 'return error || "Failure reason unavailable";' in page
 
 
@@ -228,8 +229,6 @@ def test_gallery_preserves_timestamp_words_in_evidence_rows() -> None:
 
 
 def test_gallery_uses_supplied_snapshot(monkeypatch) -> None:
-    from app.product_json import build_product_output_snapshot
-
     collection = ProductCollection.from_records(
         [ProductRecord.success_fixture("1")],
         generated_at="2026-07-16T20:00:00+08:00",
@@ -245,4 +244,24 @@ def test_gallery_uses_supplied_snapshot(monkeypatch) -> None:
 
     page = render_gallery(collection, snapshot=snapshot)
 
-    assert '"product_id": "1"' in page
+    assert '"product_id":"1"' in page
+
+
+def test_gallery_embeds_supplied_snapshot_without_reserializing_with_spaces() -> None:
+    collection = ProductCollection.from_records(
+        [ProductRecord.success_fixture("1")],
+        generated_at="2026-07-16T20:00:00+08:00",
+        blocked=False,
+    )
+    snapshot = build_product_output_snapshot(collection)
+
+    page = render_gallery(collection, snapshot=snapshot)
+    embedded = page.split(
+        '<script id="product-data" type="application/json">', 1
+    )[1].split("</script>", 1)[0]
+
+    expected = snapshot.json_text.rstrip("\n")
+    expected = expected.replace("<", "\\u003c")
+    expected = expected.replace(">", "\\u003e")
+    expected = expected.replace("&", "\\u0026")
+    assert embedded == expected

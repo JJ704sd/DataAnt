@@ -1,6 +1,7 @@
 import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -63,6 +64,45 @@ def test_failed_directory_swap_restores_previous_bundle(
     assert (target / "products.json").read_bytes() == original_json
 
 
+def test_failed_initial_directory_swap_raises_output_locked_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "demo"
+    bundle = ProductOutputBundle(target)
+    bundle.write(collection("1"))
+    original_json = (target / "products.json").read_bytes()
+
+    real_replace = bundle_module.os.replace
+
+    def fail_first_replace(source: Path, destination: Path) -> None:
+        raise PermissionError("locked")
+
+    monkeypatch.setattr(bundle_module.os, "replace", fail_first_replace)
+    with pytest.raises(OutputLockedError):
+        bundle.write(collection("2"))
+
+    assert (target / "products.json").read_bytes() == original_json
+
+
+def test_concurrent_writes_to_same_target_are_serialized(tmp_path: Path) -> None:
+    target = tmp_path / "demo"
+    barrier = threading.Barrier(2)
+
+    def write_one(product_id: str) -> None:
+        barrier.wait(timeout=5.0)
+        ProductOutputBundle(target).write(collection(product_id))
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(write_one, "1"),
+            executor.submit(write_one, "2"),
+        ]
+        for future in futures:
+            future.result()
+
+    assert set(ProductOutputBundle(target).read_product_ids()) == {"1", "2"}
+
+
 def test_bundle_passes_shared_rows_to_excel(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -98,6 +138,87 @@ def test_writer_failure_leaves_existing_bundle_and_cleans_siblings(
     assert (target / "products.json").read_bytes() == original_json
     assert not list(target.parent.glob(f".{target.name}.staging-*"))
     assert not list(target.parent.glob(f".{target.name}.backup-*"))
+
+
+def test_staging_cleanup_does_not_mask_writer_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "demo"
+
+    def fail_gallery(*args, **kwargs):
+        raise RuntimeError("gallery writer failed")
+
+    def fail_cleanup(*args, **kwargs):
+        raise OSError("cleanup failed")
+
+    monkeypatch.setattr(bundle_module, "render_gallery", fail_gallery)
+    monkeypatch.setattr(bundle_module.shutil, "rmtree", fail_cleanup)
+
+    with pytest.raises(RuntimeError, match="gallery writer failed"):
+        ProductOutputBundle(target).write(collection("1"))
+
+
+def test_lock_release_does_not_mask_writer_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "demo"
+
+    monkeypatch.setattr(
+        bundle_module,
+        "render_gallery",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError("gallery writer failed")
+        ),
+    )
+    monkeypatch.setattr(
+        bundle_module,
+        "_release_file_lock",
+        lambda _handle: (_ for _ in ()).throw(OSError("unlock failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="gallery writer failed"):
+        ProductOutputBundle(target).write(collection("1"))
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows lock semantics only")
+def test_windows_lock_acquisition_has_a_bounded_wait(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lock_path = tmp_path / "demo.lock"
+    handle = lock_path.open("a+b")
+    try:
+        monkeypatch.setattr(bundle_module, "BUNDLE_LOCK_TIMEOUT_SECONDS", 0.0)
+        monkeypatch.setattr(
+            bundle_module.msvcrt,
+            "locking",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                OSError("locked")
+            ),
+        )
+        with pytest.raises(OutputLockedError):
+            bundle_module._acquire_file_lock(handle)
+    finally:
+        handle.close()
+
+
+def test_writer_shutdown_cancels_pending_futures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "demo"
+    shutdown_calls: list[bool] = []
+    real_executor = bundle_module.ThreadPoolExecutor
+
+    class RecordingExecutor(real_executor):
+        def shutdown(
+            self, wait: bool = True, *, cancel_futures: bool = False
+        ) -> None:
+            shutdown_calls.append(cancel_futures)
+            super().shutdown(wait=wait, cancel_futures=cancel_futures)
+
+    monkeypatch.setattr(bundle_module, "ThreadPoolExecutor", RecordingExecutor)
+    ProductOutputBundle(target).write(collection("1"))
+
+    assert shutdown_calls == [True]
 
 
 def test_writer_active_counter_peaks_at_three(

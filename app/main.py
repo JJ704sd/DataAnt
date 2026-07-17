@@ -134,12 +134,12 @@ def _validate_product_live_run(
     profile_path = Path(args.profile_dir).resolve()
     outputs_root = (repo_root / "outputs").resolve()
     profiles_root = (repo_root / "browser-profile").resolve()
-    if not output_path.is_relative_to(outputs_root):
+    if output_path == outputs_root or not output_path.is_relative_to(outputs_root):
         logger.error(
             "Output dir must live inside %s", outputs_root
         )
         return False
-    if not profile_path.is_relative_to(profiles_root):
+    if profile_path == profiles_root or not profile_path.is_relative_to(profiles_root):
         logger.error(
             "Profile dir must live inside %s", profiles_root
         )
@@ -241,8 +241,8 @@ def _execute_products(args: argparse.Namespace, logger) -> int:
 
     try:
         bundle_started = time.perf_counter()
-        ProductOutputBundle(output_dir).write(collection)
-        local_output_ms = (time.perf_counter() - bundle_started) * 1000.0
+        bundle_receipt = ProductOutputBundle(output_dir).write(collection)
+        elapsed_output_ms = (time.perf_counter() - bundle_started) * 1000.0
     except OutputLockedError as exc:
         logger.error("Output locked: %s", exc)
         return 4
@@ -253,14 +253,27 @@ def _execute_products(args: argparse.Namespace, logger) -> int:
     # Read back the three file sizes locally so the metric log stays
     # strictly numeric. No HTML, cookie, header, profile path, or
     # API key value is ever read or logged here.
-    bytes_by_file: dict[str, int] = {}
-    if output_dir.is_dir():
-        for artifact in sorted(output_dir.iterdir()):
-            if artifact.is_file():
-                bytes_by_file[artifact.name] = artifact.stat().st_size
+    receipt_bytes = getattr(bundle_receipt, "bytes_by_file", None)
+    if receipt_bytes is not None:
+        bytes_by_file = dict(receipt_bytes)
+    else:
+        bytes_by_file = {}
+        if output_dir.is_dir():
+            for artifact in sorted(output_dir.iterdir()):
+                if artifact.is_file():
+                    bytes_by_file[artifact.name] = artifact.stat().st_size
     bundle_bytes = sum(bytes_by_file.values())
     writer_count = len(bytes_by_file)
-    record_count = collection.summary.total
+    receipt_ids = getattr(bundle_receipt, "product_ids", None)
+    record_count = (
+        len(receipt_ids)
+        if receipt_ids is not None
+        else collection.summary.total
+    )
+    local_output_ms = (
+        getattr(bundle_receipt, "total_local_ms", 0.0)
+        or elapsed_output_ms
+    )
     logger.info(
         "stage=metrics paced_operations=%s network_retry_count=%s "
         "detail_records=%s discovery_ms=%.3f detail_ms=%.3f",
@@ -272,11 +285,17 @@ def _execute_products(args: argparse.Namespace, logger) -> int:
     )
     logger.info(
         "stage=bundle local_output_ms=%.3f writers=%s records=%s "
-        "bundle_bytes=%s",
+        "bundle_bytes=%s payload_build_ms=%.3f json_write_ms=%.3f "
+        "gallery_write_ms=%.3f excel_write_ms=%.3f verify_ms=%.3f",
         local_output_ms,
         writer_count,
         record_count,
         bundle_bytes,
+        getattr(bundle_receipt, "payload_build_ms", 0.0),
+        getattr(bundle_receipt, "json_write_ms", 0.0),
+        getattr(bundle_receipt, "gallery_write_ms", 0.0),
+        getattr(bundle_receipt, "excel_write_ms", 0.0),
+        getattr(bundle_receipt, "verify_ms", 0.0),
     )
 
     if collection.summary.blocked:

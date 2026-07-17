@@ -16,9 +16,10 @@ introduced in Task 3. The benchmark is fully offline:
   without ever calling ``tab.get()`` or touching the network.
 
 The :func:`run_benchmark` helper returns a JSON-serialisable report
-with the worker ceilings, the maximum observed queue depth, and one
-``runs`` entry per (count, iteration) sample. The CLI form prints
-the report as a single JSON document on stdout and exits 0.
+with the worker ceilings, the maximum observed queue depth, optimized
+and serial-baseline entries per (count, iteration) sample, and median
+comparison fields. The CLI form prints the report as a single JSON
+document on stdout and exits 0.
 """
 
 from __future__ import annotations
@@ -31,9 +32,15 @@ import tracemalloc
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from queue import Empty, Queue
+from statistics import median
 from typing import Iterable
 
+from app.product_excel import ProductExcel
+from app.product_gallery import render_gallery
+from app.product_json import product_payload, render_product_json
+from app.product_models import ProductListing
 from app.product_output_bundle import ProductOutputBundle
+from app.sites.web_scraping_dev import WebScrapingDevAdapter
 from tests.helpers_product_performance import fixture_collection
 
 #: Worker ceilings for the parallel writer / parser side. The writer
@@ -67,14 +74,32 @@ def _parse_one_fixture(
     fixture_name: str,
     fixture_dir: Path,
 ) -> dict[str, int]:
-    """Parse one local fixture file off the disk and return a small
-    summary. The benchmark only cares about the parser's wall time
-    and memory footprint; the parsed content is discarded.
-    """
+    """Parse one local fixture with the production web-scraping adapter."""
     html = (fixture_dir / fixture_name).read_text(encoding="utf-8")
-    # Touch the parsed text so the memory tracker sees the allocation.
-    byte_count = len(html.encode("utf-8"))
-    return {"fixture": fixture_name, "bytes": byte_count}
+    adapter = WebScrapingDevAdapter()
+    if fixture_name in _FIXTURE_PAGES:
+        page = adapter.parse_products_html(html, adapter.PRODUCTS_URL)
+        parsed_records = len(page.listings)
+    else:
+        page_html = (fixture_dir / _FIXTURE_PAGES[0]).read_text(
+            encoding="utf-8"
+        )
+        page = adapter.parse_products_html(page_html, adapter.PRODUCTS_URL)
+        listing = page.listings[0] if page.listings else ProductListing(
+            product_id="1",
+            product_url="https://web-scraping.dev/product/1",
+        )
+        record = adapter.parse_detail_html(
+            html,
+            listing,
+            listing.product_url,
+        )
+        parsed_records = 1 if record.product_id else 0
+    return {
+        "fixture": fixture_name,
+        "bytes": len(html.encode("utf-8")),
+        "parsed_records": parsed_records,
+    }
 
 
 def _run_parser_phase(
@@ -94,7 +119,7 @@ def _run_parser_phase(
     pending: "Queue[str | None]" = Queue(maxsize=MAX_QUEUE_DEPTH)
     fixtures: tuple[str, ...] = tuple(pages) + tuple(details)
     if not fixtures:
-        return {"queue_depth_peak": 0, "parsed": 0}
+        return {"queue_depth_peak": 0, "parsed": 0, "parsed_records": 0}
 
     import threading
 
@@ -113,7 +138,7 @@ def _run_parser_phase(
             pending.put(None)
 
     def consumer() -> int:
-        parsed = 0
+        parsed_records = 0
         while True:
             try:
                 item = pending.get(timeout=5.0)
@@ -122,10 +147,10 @@ def _run_parser_phase(
             if item is None:
                 pending.task_done()
                 break
-            _parse_one_fixture(item, fixture_dir)
-            parsed += 1
+            parsed = _parse_one_fixture(item, fixture_dir)
+            parsed_records += int(parsed["parsed_records"])
             pending.task_done()
-        return parsed
+        return parsed_records
 
     submitter_thread = threading.Thread(target=submitter, daemon=True)
     submitter_thread.start()
@@ -142,6 +167,119 @@ def _run_parser_phase(
     return {
         "queue_depth_peak": queue_depth_peak["value"],
         "parsed": parsed_total,
+        "parsed_records": parsed_total,
+    }
+
+
+def _output_sizes(directory: Path) -> dict[str, int]:
+    return {
+        path.name: path.stat().st_size
+        for path in sorted(directory.iterdir())
+        if path.is_file()
+    }
+
+
+def _verify_serial_outputs(collection, directory: Path) -> float:
+    started = time.perf_counter()
+    expected_ids = [record.product_id for record in collection.records]
+    excel_ids = [
+        record.product_id
+        for record in ProductExcel.read(directory / "products.xlsx")
+    ]
+    payload = json.loads(
+        (directory / "products.json").read_text(encoding="utf-8")
+    )
+    json_ids = [
+        str(item.get("product_id")) for item in payload.get("products", [])
+    ]
+    if excel_ids != expected_ids or json_ids != expected_ids:
+        raise ValueError("baseline artifacts have inconsistent product order")
+    for filename in ("products.xlsx", "products.json", "gallery.html"):
+        if not (directory / filename).is_file():
+            raise ValueError(f"baseline output is missing {filename}")
+    return (time.perf_counter() - started) * 1000.0
+
+
+def _run_baseline_output(collection, target: Path) -> dict[str, object]:
+    """Write the three artifacts serially through the pre-bundle APIs."""
+    target.mkdir(parents=True, exist_ok=True)
+    started = time.perf_counter()
+
+    payload_started = time.perf_counter()
+    product_payload(collection)
+    payload_build_ms = (time.perf_counter() - payload_started) * 1000.0
+
+    excel_started = time.perf_counter()
+    ProductExcel.write(target / "products.xlsx", list(collection.records))
+    excel_write_ms = (time.perf_counter() - excel_started) * 1000.0
+
+    json_started = time.perf_counter()
+    (target / "products.json").write_text(
+        render_product_json(collection),
+        encoding="utf-8",
+    )
+    json_write_ms = (time.perf_counter() - json_started) * 1000.0
+
+    gallery_started = time.perf_counter()
+    (target / "gallery.html").write_text(
+        render_gallery(collection),
+        encoding="utf-8",
+    )
+    gallery_write_ms = (time.perf_counter() - gallery_started) * 1000.0
+
+    verify_ms = _verify_serial_outputs(collection, target)
+    sizes = _output_sizes(target)
+    return {
+        "records": len(collection.records),
+        "payload_build_ms": round(payload_build_ms, 3),
+        "json_write_ms": round(json_write_ms, 3),
+        "gallery_write_ms": round(gallery_write_ms, 3),
+        "excel_write_ms": round(excel_write_ms, 3),
+        "verify_ms": round(verify_ms, 3),
+        "total_local_ms": round(
+            (time.perf_counter() - started) * 1000.0,
+            3,
+        ),
+        "bundle_bytes": sum(sizes.values()),
+        "products_json_bytes": sizes.get("products.json", 0),
+        "gallery_html_bytes": sizes.get("gallery.html", 0),
+        "products_xlsx_bytes": sizes.get("products.xlsx", 0),
+    }
+
+
+def _run_optimized_output(collection, target: Path) -> dict[str, object]:
+    """Write through ProductOutputBundle and expose its timing receipt."""
+    started = time.perf_counter()
+    receipt = ProductOutputBundle(target).write(collection)
+    sizes = _output_sizes(target)
+    total_local_ms = (time.perf_counter() - started) * 1000.0
+    return {
+        "records": len(getattr(receipt, "product_ids", collection.records)),
+        "payload_build_ms": round(
+            float(getattr(receipt, "payload_build_ms", 0.0)),
+            3,
+        ),
+        "json_write_ms": round(
+            float(getattr(receipt, "json_write_ms", 0.0)),
+            3,
+        ),
+        "gallery_write_ms": round(
+            float(getattr(receipt, "gallery_write_ms", 0.0)),
+            3,
+        ),
+        "excel_write_ms": round(
+            float(getattr(receipt, "excel_write_ms", 0.0)),
+            3,
+        ),
+        "verify_ms": round(
+            float(getattr(receipt, "verify_ms", 0.0)),
+            3,
+        ),
+        "total_local_ms": round(total_local_ms, 3),
+        "bundle_bytes": sum(sizes.values()),
+        "products_json_bytes": sizes.get("products.json", 0),
+        "gallery_html_bytes": sizes.get("gallery.html", 0),
+        "products_xlsx_bytes": sizes.get("products.xlsx", 0),
     }
 
 
@@ -171,6 +309,8 @@ def run_benchmark(
     """
     if iterations <= 0:
         raise ValueError("iterations must be positive")
+    if not counts:
+        raise ValueError("counts must not be empty")
     for count in counts:
         if count not in {1, 5, 10}:
             raise ValueError(
@@ -184,62 +324,122 @@ def run_benchmark(
         Path(output_root).mkdir(parents=True, exist_ok=True)
 
     runs: list[dict[str, object]] = []
+    baseline_runs: list[dict[str, object]] = []
     max_queue_depth = 0
     with tempfile.TemporaryDirectory(prefix="benchmark-products-") as tmp:
         tmp_path = Path(tmp)
         for count in counts:
             for iteration in range(1, iterations + 1):
-                # Re-trace each sample so peak memory is per-run.
+                parser_phase = _run_parser_phase(_FIXTURE_DIR)
+                observed_depth = int(parser_phase.get("queue_depth_peak", 0))
+                if observed_depth > max_queue_depth:
+                    max_queue_depth = observed_depth
+
+                collection = fixture_collection(count)
+                optimized_target = tmp_path / (
+                    f"run-{count}-{iteration}-optimized"
+                )
+                baseline_target = tmp_path / (
+                    f"run-{count}-{iteration}-baseline"
+                )
+
+                # Re-trace each optimized sample so peak memory is per-run.
                 tracemalloc.start()
                 try:
-                    parser_phase = _run_parser_phase(_FIXTURE_DIR)
-                    observed_depth = int(
-                        parser_phase.get("queue_depth_peak", 0)
+                    optimized = _run_optimized_output(
+                        collection,
+                        optimized_target,
                     )
-                    if observed_depth > max_queue_depth:
-                        max_queue_depth = observed_depth
-
-                    collection = fixture_collection(count)
-                    target = tmp_path / f"run-{count}-{iteration}"
-                    started = time.perf_counter()
-                    ProductOutputBundle(target).write(collection)
-                    total_local_ms = (time.perf_counter() - started) * 1000.0
-                    bytes_by_file: dict[str, int] = {
-                        path.name: path.stat().st_size
-                        for path in sorted(target.iterdir())
-                        if path.is_file()
-                    }
-                    bundle_bytes = sum(bytes_by_file.values())
-                    _, peak_bytes = tracemalloc.get_traced_memory()
+                    _, optimized_peak_bytes = tracemalloc.get_traced_memory()
                 finally:
                     tracemalloc.stop()
 
+                # Keep the serial baseline separate so its memory sample does
+                # not include the optimized writer's allocations.
+                tracemalloc.start()
+                try:
+                    baseline = _run_baseline_output(
+                        collection,
+                        baseline_target,
+                    )
+                    _, baseline_peak_bytes = tracemalloc.get_traced_memory()
+                finally:
+                    tracemalloc.stop()
+
+                common = {
+                    "count": count,
+                    "iteration": iteration,
+                    "parser_queue_depth_peak": observed_depth,
+                    "parser_records": int(
+                        parser_phase.get("parsed_records", 0)
+                    ),
+                }
                 runs.append(
                     {
-                        "count": count,
-                        "iteration": iteration,
-                        "total_local_ms": round(total_local_ms, 3),
-                        "bundle_bytes": bundle_bytes,
-                        "products_json_bytes": bytes_by_file.get(
-                            "products.json", 0
-                        ),
-                        "gallery_html_bytes": bytes_by_file.get(
-                            "gallery.html", 0
-                        ),
-                        "products_xlsx_bytes": bytes_by_file.get(
-                            "products.xlsx", 0
-                        ),
-                        "peak_memory_bytes": peak_bytes,
-                        "parser_queue_depth_peak": observed_depth,
+                        **common,
+                        **optimized,
+                        "peak_memory_bytes": optimized_peak_bytes,
                     }
                 )
+                baseline_runs.append(
+                    {
+                        **common,
+                        **baseline,
+                        "peak_memory_bytes": baseline_peak_bytes,
+                    }
+                )
+
+    optimized_medians: dict[str, float] = {}
+    baseline_medians: dict[str, float] = {}
+    comparison: dict[str, dict[str, object]] = {}
+    for count in dict.fromkeys(counts):
+        optimized_median = round(
+            float(
+                median(
+                    float(run["total_local_ms"])
+                    for run in runs
+                    if run["count"] == count
+                )
+            ),
+            3,
+        )
+        baseline_median = round(
+            float(
+                median(
+                    float(run["total_local_ms"])
+                    for run in baseline_runs
+                    if run["count"] == count
+                )
+            ),
+            3,
+        )
+        speedup_percent = (
+            ((baseline_median - optimized_median) / baseline_median) * 100.0
+            if baseline_median
+            else 0.0
+        )
+        key = str(count)
+        optimized_medians[key] = optimized_median
+        baseline_medians[key] = baseline_median
+        comparison[key] = {
+            "count": count,
+            "optimized_median_total_local_ms": optimized_median,
+            "baseline_median_total_local_ms": baseline_median,
+            "median_speedup_percent": round(speedup_percent, 3),
+            "optimized_faster": optimized_median < baseline_median,
+        }
 
     return {
         "writer_workers": WRITER_WORKERS,
         "parser_workers": PARSER_WORKERS,
-        "max_queue_depth": max(max_queue_depth, MAX_QUEUE_DEPTH),
+        "max_queue_depth": max_queue_depth,
         "fixture_dir": str(_FIXTURE_DIR),
+        "iterations": iterations,
         "runs": runs,
+        "baseline_runs": baseline_runs,
+        "optimized_median_total_local_ms": optimized_medians,
+        "baseline_median_total_local_ms": baseline_medians,
+        "comparison": comparison,
     }
 
 

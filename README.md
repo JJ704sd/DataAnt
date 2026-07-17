@@ -280,6 +280,8 @@ python -m app.main collect-products `
 # 离线 benchmark：仅用 tests/fixtures + tests/helpers_product_performance.py fixture
 # 不启浏览器、不访问网络、stdout 输出 JSON 报告
 & .\.venv\Scripts\python.exe -m scripts.benchmark_products --counts 1,5,10 --iterations 5
+# The offline report includes parser-backed fixture samples, serial baseline,
+# optimized phase timings, and the comparison summary.
 
 # artifacts 清理：默认 DRY-RUN，只 --apply 才真删
 # validate_artifacts_root hard-block 仓库外 root，越界直接抛 ValueError

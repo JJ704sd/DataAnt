@@ -644,11 +644,49 @@ def test_collect_products_rejects_output_dir_outside_repo_outputs(
     assert _FakeProductRunner.instances == []
 
 
+def test_collect_products_rejects_outputs_root_itself(
+    stub_dependencies: dict,
+) -> None:
+    outputs_root = Path(main.__file__).resolve().parent.parent / "outputs"
+
+    rc = execute(
+        products_live_args(
+            stub_dependencies,
+            "--output-dir",
+            str(outputs_root),
+        )
+    )
+
+    assert rc == 2
+    assert _FakeBrowserSession.instances == []
+    assert _FakeProductRunner.instances == []
+
+
 def test_collect_products_rejects_profile_dir_outside_repo_browser_profile(
     stub_dependencies: dict, tmp_path: Path,
 ) -> None:
     outside = tmp_path / "escape-profile"
     rc = execute(products_live_args(stub_dependencies, "--profile-dir", str(outside)))
+    assert rc == 2
+    assert _FakeBrowserSession.instances == []
+    assert _FakeProductRunner.instances == []
+
+
+def test_collect_products_rejects_browser_profile_root_itself(
+    stub_dependencies: dict,
+) -> None:
+    profiles_root = (
+        Path(main.__file__).resolve().parent.parent / "browser-profile"
+    )
+
+    rc = execute(
+        products_live_args(
+            stub_dependencies,
+            "--profile-dir",
+            str(profiles_root),
+        )
+    )
+
     assert rc == 2
     assert _FakeBrowserSession.instances == []
     assert _FakeProductRunner.instances == []
