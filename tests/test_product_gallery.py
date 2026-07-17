@@ -1,12 +1,62 @@
 from dataclasses import replace
 
 from app.product_gallery import render_gallery
-from app.product_models import ProductCollection, ProductRecord
+from app.product_models import (
+    ProductCollection,
+    ProductListing,
+    ProductRecord,
+    ProductStatus,
+)
 
 
 def gallery() -> str:
     collection = ProductCollection.from_records(
         [ProductRecord.success_fixture("1")],
+        generated_at="2026-07-16T20:00:00+08:00",
+        blocked=False,
+    )
+    return render_gallery(collection)
+
+
+def quality_gallery() -> str:
+    partial_a = replace(
+        ProductRecord.success_fixture(
+            "2",
+            status=ProductStatus.PARTIAL,
+            error_message="missing optional fields: category",
+        ),
+        category="",
+        description="Partial product A",
+        primary_image_url="https://web-scraping.dev/assets/products/2.webp",
+        brand="Brand A",
+    )
+    partial_b = replace(
+        ProductRecord.success_fixture(
+            "3",
+            status=ProductStatus.PARTIAL,
+            error_message="missing optional fields: category",
+        ),
+        category="   ",
+        description="Partial product B",
+        primary_image_url="https://web-scraping.dev/assets/products/3.webp",
+        brand="Brand B",
+    )
+    failed = ProductRecord.failure(
+        ProductListing(
+            "4",
+            "https://web-scraping.dev/product/4",
+            "",
+        ),
+        ProductStatus.PAGE_CHANGED,
+        "Missing required detail fields: name",
+    )
+    collection = ProductCollection.from_records(
+        [
+            ProductRecord.success_fixture("1"),
+            partial_a,
+            partial_b,
+            failed,
+        ],
         generated_at="2026-07-16T20:00:00+08:00",
         blocked=False,
     )
@@ -27,9 +77,16 @@ def test_gallery_is_self_contained_and_has_required_controls() -> None:
 
 def test_gallery_embeds_data_without_external_script_or_font_dependencies() -> None:
     page = gallery()
-    assert '<script src=' not in page
-    assert '@import url(' not in page
-    assert 'fetch(' not in page
+
+    for forbidden in (
+        "<script src=",
+        "@import url(",
+        "@font-face",
+        "fetch(",
+        "XMLHttpRequest",
+        "WebSocket",
+    ):
+        assert forbidden not in page
     assert '"product_id": "1"' in page
 
 
@@ -47,3 +104,54 @@ def test_gallery_escapes_product_content_before_embedding() -> None:
     page = render_gallery(collection)
     assert "</script><script>alert(1)</script>" not in page
     assert "\\u003c/script\\u003e" in page
+
+
+def test_gallery_renders_quality_summary_and_missing_field_aggregation() -> None:
+    page = quality_gallery()
+
+    assert 'id="summary-quality"' in page
+    assert 'id="summary-completeness">1 / 4<' in page
+    assert 'id="summary-missing-fields">Missing category: 2<' in page
+    assert 'id="summary-context">Showing 4 of 4 records<' in page
+
+
+def test_gallery_exposes_partial_reason_and_uncategorized_contract() -> None:
+    page = quality_gallery()
+
+    for fragment in (
+        "function missingFieldsFor(product)",
+        "function categoryValue(product)",
+        "function categoryLabel(product)",
+        'var UNCATEGORIZED_VALUE = "__UNCATEGORIZED__";',
+        "Uncategorized",
+        "Missing fields",
+        "Original reason",
+        "Data quality",
+        'aria-live="polite"',
+        'aria-label="Status: ',
+        ".product-card:focus-visible",
+    ):
+        assert fragment in page
+    assert "missing optional fields: category" in page
+
+
+def test_gallery_formats_timestamps_without_character_breaking() -> None:
+    page = quality_gallery()
+
+    assert (
+        'id="summary-generated">2026-07-16 20:00:00 (+08:00)<'
+        in page
+    )
+    assert "function formatTimestamp(value)" in page
+    assert "word-break: normal" in page
+    assert "overflow-wrap: normal" in page
+
+
+def test_gallery_recomputes_summary_for_visible_snapshot() -> None:
+    page = quality_gallery()
+
+    assert "function summarizeQuality(items)" in page
+    assert "renderSummary(filtered);" in page
+    assert "Showing \" + current.total + \" of \" + products.length" in page
+    assert "categoryValue(product) !== state.category" in page
+    assert "formatTimestamp(product.collected_at)" in page

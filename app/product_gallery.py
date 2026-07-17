@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import html
 import json
+from datetime import datetime
 from typing import Final
 
 from app.product_json import product_payload
-from app.product_models import ProductCollection
+from app.product_models import ProductCollection, ProductRecord, ProductStatus
 
 
 _CATEGORY_PALETTES: Final[tuple[tuple[str, str, str], ...]] = (
@@ -44,6 +45,59 @@ def _format_money(amount: float | None, currency: str) -> str:
     if label:
         return f"{label} {amount:.2f}"
     return f"{amount:.2f}"
+
+
+_QUALITY_FIELDS: Final[tuple[tuple[str, str], ...]] = (
+    ("category", "category"),
+    ("description", "description"),
+    ("primary_image_url", "image"),
+    ("brand", "brand"),
+)
+
+
+def _is_blank(value: object) -> bool:
+    return value is None or not str(value).strip()
+
+
+def _missing_quality_fields(record: ProductRecord) -> tuple[str, ...]:
+    if record.status is not ProductStatus.PARTIAL:
+        return ()
+    return tuple(
+        label
+        for field_name, label in _QUALITY_FIELDS
+        if _is_blank(getattr(record, field_name))
+    )
+
+
+def _quality_detail(records: tuple[ProductRecord, ...]) -> str:
+    counts = {label: 0 for _, label in _QUALITY_FIELDS}
+    for record in records:
+        for label in _missing_quality_fields(record):
+            counts[label] += 1
+
+    parts = [
+        f"Missing {label}: {counts[label]}"
+        for _, label in _QUALITY_FIELDS
+        if counts[label]
+    ]
+    return " · ".join(parts) if parts else "Fields complete"
+
+
+def _format_timestamp(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "—"
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return text
+
+    formatted = parsed.strftime("%Y-%m-%d %H:%M:%S")
+    compact_offset = parsed.strftime("%z")
+    if not compact_offset:
+        return formatted
+    offset = compact_offset[:3] + ":" + compact_offset[3:]
+    return f"{formatted} ({offset})"
 
 
 _TEMPLATE: Final[str] = """<!doctype html>
@@ -127,6 +181,18 @@ header.page-header .source {
 .summary-card[data-tone="partial"] .value { color: var(--partial); }
 .summary-card[data-tone="failed"] .value { color: var(--failed); }
 .summary-card[data-tone="blocked"] .value { color: var(--blocked); }
+.timestamp {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas,
+        "Liberation Mono", Menlo, monospace;
+    color: var(--text);
+    white-space: normal;
+    word-break: normal;
+    overflow-wrap: normal;
+}
+.product-card:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
 .layout {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 340px;
@@ -314,8 +380,14 @@ header.page-header .source {
     <div class="summary-card" data-tone="success"><span class="label">Success</span><span class="value" id="summary-success">__SUCCESS__</span></div>
     <div class="summary-card" data-tone="partial"><span class="label">Partial</span><span class="value" id="summary-partial">__PARTIAL__</span></div>
     <div class="summary-card" data-tone="failed"><span class="label">Failed</span><span class="value" id="summary-failed">__FAILED__</span></div>
-    <div class="summary-card" data-tone="meta"><span class="label">Generated</span><span class="value" id="summary-generated">__GENERATED__</span></div>
+    <div class="summary-card" data-tone="meta"><span class="label">Generated</span><span class="value timestamp" id="summary-generated">__GENERATED__</span></div>
+    <div class="summary-card" data-tone="quality" id="summary-quality">
+        <span class="label">Data quality</span>
+        <span class="value" id="summary-completeness">__QUALITY_COMPLETE__ / __QUALITY_TOTAL__</span>
+        <span class="detail" id="summary-missing-fields">__QUALITY_MISSING__</span>
+    </div>
 </section>
+<p class="summary-context" id="summary-context">Showing __TOTAL__ of __TOTAL__ records</p>
 <div class="layout">
     <main>
         <div class="toolbar">
@@ -346,7 +418,6 @@ header.page-header .source {
     var raw = dataNode ? dataNode.textContent : "null";
     var payload = JSON.parse(raw);
     var products = (payload && payload.products) ? payload.products : [];
-    var summary = (payload && payload.summary) ? payload.summary : { total: 0, success: 0, partial: 0, failed: 0 };
     var generatedAt = (payload && payload.generated_at) ? payload.generated_at : "";
 
     var state = {
@@ -373,6 +444,105 @@ header.page-header .source {
         var rounded = Number(amount).toFixed(2);
         if (label) return label + " " + rounded;
         return rounded;
+    }
+
+    var UNCATEGORIZED_VALUE = "__UNCATEGORIZED__";
+    var QUALITY_FIELDS = [
+        { key: "category", label: "category" },
+        { key: "description", label: "description" },
+        { key: "primary_image_url", label: "image" },
+        { key: "brand", label: "brand" }
+    ];
+
+    function isBlank(value) {
+        return value === null || value === undefined || String(value).trim() === "";
+    }
+
+    function categoryValue(product) {
+        var value = product ? product.category : "";
+        return isBlank(value) ? UNCATEGORIZED_VALUE : String(value);
+    }
+
+    function categoryLabel(product) {
+        var value = categoryValue(product);
+        return value === UNCATEGORIZED_VALUE ? "Uncategorized" : value;
+    }
+
+    function missingFieldsFor(product) {
+        if (!product || product.status !== "PARTIAL") return [];
+        var missing = [];
+        for (var i = 0; i < QUALITY_FIELDS.length; i++) {
+            var field = QUALITY_FIELDS[i];
+            if (isBlank(product[field.key])) missing.push(field.label);
+        }
+        return missing;
+    }
+
+    function statusLabel(product) {
+        if (!product || product.status === "SUCCESS") return "Complete";
+        if (product.status === "PARTIAL") return "Partial";
+        return "Failed";
+    }
+
+    function shortError(value) {
+        var text = String(value || "").trim();
+        if (text.length <= 120) return text;
+        return text.slice(0, 117) + "…";
+    }
+
+    function reasonText(product) {
+        if (!product || product.status === "SUCCESS") return "";
+        var missing = missingFieldsFor(product);
+        if (product.status === "PARTIAL" && missing.length) {
+            return "Missing " + missing.join(", ");
+        }
+        return shortError(product.error_message);
+    }
+
+    function summarizeQuality(items) {
+        var result = {
+            total: items.length,
+            success: 0,
+            partial: 0,
+            failed: 0,
+            missing: {}
+        };
+        for (var i = 0; i < items.length; i++) {
+            var product = items[i];
+            if (product.status === "SUCCESS") {
+                result.success += 1;
+            } else if (product.status === "PARTIAL") {
+                result.partial += 1;
+                var missing = missingFieldsFor(product);
+                for (var j = 0; j < missing.length; j++) {
+                    var label = missing[j];
+                    result.missing[label] = (result.missing[label] || 0) + 1;
+                }
+            } else {
+                result.failed += 1;
+            }
+        }
+        return result;
+    }
+
+    function formatMissingSummary(summary) {
+        var parts = [];
+        for (var i = 0; i < QUALITY_FIELDS.length; i++) {
+            var label = QUALITY_FIELDS[i].label;
+            if (summary.missing[label]) {
+                parts.push("Missing " + label + ": " + summary.missing[label]);
+            }
+        }
+        return parts.length ? parts.join(" · ") : "Fields complete";
+    }
+
+    function formatTimestamp(value) {
+        if (isBlank(value)) return "—";
+        var text = String(value).trim();
+        var match = text.match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})(?:\.\d+)?(Z|[+-]\d{2}:\d{2})?$/);
+        if (!match) return text;
+        var offset = match[3] ? (match[3] === "Z" ? "+00:00" : match[3]) : "";
+        return match[1] + " " + match[2] + (offset ? " (" + offset + ")" : "");
     }
 
     function hashToPalette(seed) {
@@ -439,7 +609,25 @@ header.page-header .source {
         return result;
     }
 
-    function populateSelect(selectId, values, allLabel) {
+    function uniqueCategoryValues(items) {
+        var seen = Object.create(null);
+        var categories = [];
+        seen[UNCATEGORIZED_VALUE] = true;
+        categories.push(UNCATEGORIZED_VALUE);
+
+        for (var i = 0; i < items.length; i++) {
+            var value = categoryValue(items[i]);
+            if (!seen[value]) {
+                seen[value] = true;
+                if (value !== UNCATEGORIZED_VALUE) categories.push(value);
+            }
+        }
+        var named = categories.slice(1);
+        named.sort();
+        return [UNCATEGORIZED_VALUE].concat(named);
+    }
+
+    function populateSelect(selectId, values, allLabel, labelForValue) {
         var select = document.getElementById(selectId);
         if (!select) return;
         select.innerHTML = "";
@@ -450,7 +638,7 @@ header.page-header .source {
         for (var i = 0; i < values.length; i++) {
             var opt = document.createElement("option");
             opt.value = values[i];
-            opt.textContent = values[i];
+            opt.textContent = labelForValue ? labelForValue(values[i]) : values[i];
             select.appendChild(opt);
         }
     }
@@ -458,7 +646,7 @@ header.page-header .source {
     function applyFilters() {
         var query = state.query.trim().toLowerCase();
         var filtered = products.filter(function (product) {
-            if (state.category && (product.category || "") !== state.category) return false;
+            if (state.category && categoryValue(product) !== state.category) return false;
             if (state.status && (product.status || "") !== state.status) return false;
             if (query) {
                 var haystack = (product.name || "") + " " + (product.brand || "") + " " + (product.description || "");
@@ -500,7 +688,7 @@ header.page-header .source {
             originalLine +
             '</div>' +
             categoryLine +
-            '<span class="badge" data-status="' + escapeHtml(product.status || "UNEXPECTED_ERROR") + '">' + escapeHtml(product.status || "UNEXPECTED_ERROR") + '</span>' +
+            '<span class="badge" data-status="' + escapeHtml(product.status || "UNEXPECTED_ERROR") + '" aria-label="Status: ' + escapeHtml(product.status === "SUCCESS" ? "Complete" : product.status === "PARTIAL" ? "Partial" : "Failed") + '">' + escapeHtml(product.status || "UNEXPECTED_ERROR") + '</span>' +
             '</div>' +
             '</article>';
     }
@@ -509,6 +697,7 @@ header.page-header .source {
         var grid = document.getElementById("product-grid");
         if (!grid) return;
         var filtered = applyFilters();
+        renderSummary(filtered);
         if (filtered.length === 0) {
             grid.innerHTML = '<div class="empty-state">No products match the current filters.</div>';
             return;
@@ -559,6 +748,13 @@ header.page-header .source {
             return;
         }
         if (empty) empty.style.display = "none";
+        var qualitySection = document.createElement("section");
+        qualitySection.className = "evidence-section";
+        qualitySection.innerHTML =
+            '<h3>Data quality</h3>' +
+            fieldRow("Missing fields", missingFieldsFor(product).length ? missingFieldsFor(product).join(", ") : "Fields complete") +
+            fieldRow("Original reason", product.error_message, { mono: true });
+        panel.appendChild(qualitySection);
         var extraRows = panel.querySelectorAll(":scope > *:not(h2):not(.empty)");
         for (var k = 0; k < extraRows.length; k++) extraRows[k].remove();
         var rows = [
@@ -571,7 +767,7 @@ header.page-header .source {
             fieldRow("Currency", product.currency),
             fieldRow("Variants", product.variant_count !== undefined && product.variant_count !== null ? product.variant_count : 0),
             fieldRow("Status", product.status),
-            fieldRow("Collected at", product.collected_at),
+            fieldRow("Collected at", formatTimestamp(product.collected_at)),
             fieldRow("Product ID", product.product_id, { mono: true }),
             fieldRow("Primary image URL", product.primary_image_url, { mono: true }),
             fieldRow("Error", product.error_message),
@@ -602,17 +798,32 @@ header.page-header .source {
         }
     }
 
-    function renderSummary() {
+    function renderSummary(items) {
+        var current = summarizeQuality(items);
         var total = document.getElementById("summary-total");
         var success = document.getElementById("summary-success");
         var partial = document.getElementById("summary-partial");
         var failed = document.getElementById("summary-failed");
         var generated = document.getElementById("summary-generated");
-        if (total) total.textContent = summary.total !== undefined ? summary.total : products.length;
-        if (success) success.textContent = summary.success !== undefined ? summary.success : 0;
-        if (partial) partial.textContent = summary.partial !== undefined ? summary.partial : 0;
-        if (failed) failed.textContent = summary.failed !== undefined ? summary.failed : 0;
-        if (generated) generated.textContent = generatedAt || "—";
+        var completeness = document.getElementById("summary-completeness");
+        var missingFields = document.getElementById("summary-missing-fields");
+        var context = document.getElementById("summary-context");
+
+        if (total) total.textContent = current.total;
+        if (success) success.textContent = current.success;
+        if (partial) partial.textContent = current.partial;
+        if (failed) failed.textContent = current.failed;
+        if (generated) generated.textContent = formatTimestamp(generatedAt);
+        if (completeness) {
+            completeness.textContent = current.success + " / " + current.total;
+        }
+        if (missingFields) {
+            missingFields.textContent = formatMissingSummary(current);
+        }
+        if (context) {
+            context.textContent =
+                "Showing " + current.total + " of " + products.length + " records";
+        }
     }
 
     function attachControls() {
@@ -647,9 +858,19 @@ header.page-header .source {
     }
 
     function init() {
-        populateSelect("category-filter", uniqueValues(products, "category"), "All categories");
-        populateSelect("status-filter", uniqueValues(products, "status"), "All statuses");
-        renderSummary();
+        populateSelect(
+            "category-filter",
+            uniqueCategoryValues(products),
+            "All categories",
+            function (value) {
+                return value === UNCATEGORIZED_VALUE ? "Uncategorized" : value;
+            }
+        );
+        populateSelect(
+            "status-filter",
+            uniqueValues(products, "status"),
+            "All statuses"
+        );
         renderProducts();
         attachControls();
         if (products.length > 0) {
@@ -677,7 +898,8 @@ def render_gallery(collection: ProductCollection) -> str:
         .replace("&", "\\u0026")
     )
     summary = collection.summary
-    generated_label = collection.generated_at or "—"
+    quality_missing = _quality_detail(collection.records)
+    generated_label = _format_timestamp(collection.generated_at)
     return (
         _TEMPLATE
         .replace("__EMBEDDED_DATA__", embedded)
@@ -685,6 +907,9 @@ def render_gallery(collection: ProductCollection) -> str:
         .replace("__SUCCESS__", str(summary.success))
         .replace("__PARTIAL__", str(summary.partial))
         .replace("__FAILED__", str(summary.failed))
+        .replace("__QUALITY_COMPLETE__", str(summary.success))
+        .replace("__QUALITY_TOTAL__", str(summary.total))
+        .replace("__QUALITY_MISSING__", html.escape(quality_missing))
         .replace("__GENERATED__", html.escape(generated_label))
     )
 
