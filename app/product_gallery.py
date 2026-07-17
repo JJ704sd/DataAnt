@@ -154,7 +154,7 @@ header.page-header .source {
 }
 .summary-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     gap: var(--gap);
     margin-bottom: 24px;
 }
@@ -193,6 +193,47 @@ header.page-header .source {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
 }
+.summary-card[data-tone="quality"] .value { color: var(--accent); }
+.summary-card .detail {
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.35;
+}
+.summary-context {
+    margin: -12px 0 24px;
+    color: var(--muted);
+    font-size: 13px;
+}
+.status-line {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.quality-note {
+    color: var(--muted);
+    font-size: 12px;
+}
+.quality-note[data-status="PARTIAL"] { color: var(--partial); }
+.quality-note[data-status="PAGE_CHANGED"],
+.quality-note[data-status="NETWORK_ERROR"],
+.quality-note[data-status="BLOCKED"],
+.quality-note[data-status="UNEXPECTED_ERROR"] { color: var(--failed); }
+.toolbar input:focus-visible,
+.toolbar select:focus-visible,
+.evidence-panel a:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+.evidence-section {
+    border-top: 1px solid var(--line);
+    padding-top: 12px;
+}
+.evidence-section h3 {
+    margin: 0 0 8px;
+    font-size: 13px;
+    color: var(--text);
+}
 .layout {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 340px;
@@ -200,6 +241,10 @@ header.page-header .source {
 }
 @media (max-width: 960px) {
     .layout { grid-template-columns: 1fr; }
+    .evidence-panel {
+        position: static;
+        max-height: none;
+    }
 }
 .toolbar {
     display: grid;
@@ -224,7 +269,7 @@ header.page-header .source {
 }
 .product-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
     gap: var(--gap);
 }
 .product-card {
@@ -375,7 +420,7 @@ header.page-header .source {
     <h1>web-scraping.dev Product Gallery</h1>
     <div class="source">Data source: web-scraping.dev — local snapshot, no remote requests on open.</div>
 </header>
-<section class="summary-grid" id="summary-grid">
+<section class="summary-grid" id="summary-grid" aria-live="polite" aria-atomic="true">
     <div class="summary-card" data-tone="total"><span class="label">Total</span><span class="value" id="summary-total">__TOTAL__</span></div>
     <div class="summary-card" data-tone="success"><span class="label">Success</span><span class="value" id="summary-success">__SUCCESS__</span></div>
     <div class="summary-card" data-tone="partial"><span class="label">Partial</span><span class="value" id="summary-partial">__PARTIAL__</span></div>
@@ -670,27 +715,51 @@ header.page-header .source {
     function cardMarkup(product) {
         var visual = visualFor(product);
         var currentPrice = formatMoney(product.current_price, product.currency);
-        var originalPrice = product.original_price !== null && product.original_price !== undefined ? formatMoney(product.original_price, product.currency) : "";
+        var originalPrice =
+            product.original_price !== null && product.original_price !== undefined
+                ? formatMoney(product.original_price, product.currency)
+                : "";
         var selected = product.product_id === state.selectedId ? " selected" : "";
-        var gradient = "linear-gradient(135deg, " + visual.palette.start + " 0%, " + visual.palette.end + " 100%)";
-        var categoryLine = product.category ? '<div class="category">' + escapeHtml(product.category) + '</div>' : '';
-        var originalLine = originalPrice ? '<span class="price-original">' + escapeHtml(originalPrice) + '</span>' : '';
-        return '' +
-            '<article class="product-card' + selected + '" data-id="' + escapeHtml(product.product_id) + '" tabindex="0" role="button" aria-label="Select ' + escapeHtml(product.name || product.product_id) + '">' +
-            '<div class="visual" style="background:' + gradient + '; color:' + visual.palette.ink + ';">' +
+        var gradient =
+            "linear-gradient(135deg, " + visual.palette.start + " 0%, " +
+            visual.palette.end + " 100%)";
+        var categoryLine =
+            '<div class="category">' + escapeHtml(categoryLabel(product)) + "</div>";
+        var originalLine = originalPrice
+            ? '<span class="price-original">' + escapeHtml(originalPrice) + "</span>"
+            : "";
+        var rawStatus = product.status || "UNEXPECTED_ERROR";
+        var note = reasonText(product);
+        var noteLine = note
+            ? '<span class="quality-note" data-status="' +
+              escapeHtml(rawStatus) + '">' + escapeHtml(note) + "</span>"
+            : "";
+
+        return "" +
+            '<article class="product-card' + selected +
+            '" data-id="' + escapeHtml(product.product_id) +
+            '" tabindex="0" role="button" aria-label="Select ' +
+            escapeHtml(product.name || product.product_id) + '">' +
+            '<div class="visual" style="background:' + gradient +
+            "; color:" + visual.palette.ink + ';">' +
             escapeHtml(visual.letter) +
             iconMarkup(product.category) +
-            '</div>' +
+            "</div>" +
             '<div class="body">' +
-            '<div class="name">' + escapeHtml(product.name || product.product_id) + '</div>' +
+            '<div class="name">' + escapeHtml(product.name || product.product_id) + "</div>" +
             '<div class="price-row">' +
-            '<span class="price-current">' + escapeHtml(currentPrice) + '</span>' +
+            '<span class="price-current">' + escapeHtml(currentPrice) + "</span>" +
             originalLine +
-            '</div>' +
+            "</div>" +
             categoryLine +
-            '<span class="badge" data-status="' + escapeHtml(product.status || "UNEXPECTED_ERROR") + '" aria-label="Status: ' + escapeHtml(product.status === "SUCCESS" ? "Complete" : product.status === "PARTIAL" ? "Partial" : "Failed") + '">' + escapeHtml(product.status || "UNEXPECTED_ERROR") + '</span>' +
-            '</div>' +
-            '</article>';
+            '<div class="status-line">' +
+            '<span class="badge" data-status="' + escapeHtml(rawStatus) +
+            '" aria-label="Status: ' + escapeHtml(statusLabel(product)) + '">' +
+            escapeHtml(statusLabel(product)) + "</span>" +
+            noteLine +
+            "</div>" +
+            "</div>" +
+            "</article>";
     }
 
     function renderProducts() {
@@ -725,16 +794,23 @@ header.page-header .source {
     function fieldRow(label, value, options) {
         options = options || {};
         var content;
+        var valueClass = options.className ? " " + options.className : "";
         if (value === null || value === undefined || value === "") {
             content = '<span class="val muted">—</span>';
         } else if (options.mono) {
-            content = '<pre>' + escapeHtml(value) + '</pre>';
+            content = "<pre>" + escapeHtml(value) + "</pre>";
         } else if (options.link) {
-            content = '<a class="val" href="' + escapeHtml(value) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml(value) + '</a>';
+            content =
+                '<a class="val' + valueClass + '" href="' + escapeHtml(value) +
+                '" target="_blank" rel="noopener noreferrer">' +
+                escapeHtml(value) + "</a>";
         } else {
-            content = '<span class="val">' + escapeHtml(value) + '</span>';
+            content =
+                '<span class="val' + valueClass + '">' +
+                escapeHtml(value) + "</span>";
         }
-        return '<div class="row"><span class="key">' + escapeHtml(label) + '</span>' + content + '</div>';
+        return '<div class="row"><span class="key">' +
+            escapeHtml(label) + "</span>" + content + "</div>";
     }
 
     function renderEvidence(product) {
@@ -747,32 +823,54 @@ header.page-header .source {
             for (var i = 0; i < extra.length; i++) extra[i].remove();
             return;
         }
+
         if (empty) empty.style.display = "none";
-        var qualitySection = document.createElement("section");
-        qualitySection.className = "evidence-section";
-        qualitySection.innerHTML =
-            '<h3>Data quality</h3>' +
-            fieldRow("Missing fields", missingFieldsFor(product).length ? missingFieldsFor(product).join(", ") : "Fields complete") +
-            fieldRow("Original reason", product.error_message, { mono: true });
-        panel.appendChild(qualitySection);
         var extraRows = panel.querySelectorAll(":scope > *:not(h2):not(.empty)");
         for (var k = 0; k < extraRows.length; k++) extraRows[k].remove();
+
+        var missing = missingFieldsFor(product);
+        var qualitySection = document.createElement("section");
+        qualitySection.className = "evidence-section";
+        qualitySection.setAttribute("aria-labelledby", "evidence-quality-heading");
+        qualitySection.innerHTML =
+            '<h3 id="evidence-quality-heading">Data quality</h3>' +
+            fieldRow(
+                "Missing fields",
+                missing.length ? missing.join(", ") : "Fields complete"
+            ) +
+            fieldRow("Original reason", product.error_message, { mono: true });
+        panel.appendChild(qualitySection);
+
         var rows = [
             fieldRow("Name", product.name),
             fieldRow("Description", product.description),
-            fieldRow("Category", product.category),
+            fieldRow("Category", categoryLabel(product)),
             fieldRow("Brand", product.brand),
             fieldRow("Current price", formatMoney(product.current_price, product.currency)),
-            fieldRow("Original price", product.original_price !== null && product.original_price !== undefined ? formatMoney(product.original_price, product.currency) : null),
+            fieldRow(
+                "Original price",
+                product.original_price !== null && product.original_price !== undefined
+                    ? formatMoney(product.original_price, product.currency)
+                    : null
+            ),
             fieldRow("Currency", product.currency),
-            fieldRow("Variants", product.variant_count !== undefined && product.variant_count !== null ? product.variant_count : 0),
+            fieldRow(
+                "Variants",
+                product.variant_count !== undefined && product.variant_count !== null
+                    ? product.variant_count
+                    : 0
+            ),
             fieldRow("Status", product.status),
-            fieldRow("Collected at", formatTimestamp(product.collected_at)),
+            fieldRow(
+                "Collected at",
+                formatTimestamp(product.collected_at),
+                { className: "timestamp" }
+            ),
             fieldRow("Product ID", product.product_id, { mono: true }),
             fieldRow("Primary image URL", product.primary_image_url, { mono: true }),
-            fieldRow("Error", product.error_message),
             fieldRow("Source URL", product.product_url, { link: true })
         ];
+
         for (var r = 0; r < rows.length; r++) {
             var div = document.createElement("div");
             div.innerHTML = rows[r];
