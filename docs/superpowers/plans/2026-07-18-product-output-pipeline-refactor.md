@@ -792,6 +792,7 @@ Create `app/product_bundle_transaction.py` with the existing platform lock helpe
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import sys
 import threading
@@ -896,14 +897,18 @@ class ProductBundleTransaction:
     ) -> tuple[Path, ...]:
         if max_age_seconds <= 0:
             raise ValueError("max_age_seconds must be positive")
-        allowed_prefixes = (
-            f".{self.target_dir.name}.staging-",
-            f".{self.target_dir.name}.backup-",
+        generated_name = re.compile(
+            rf"\.{re.escape(self.target_dir.name)}\."
+            rf"(?:staging|backup)-[0-9a-f]{{32}}"
         )
         now = time.time()
         removed: list[Path] = []
         for candidate in self.target_dir.parent.iterdir():
-            if not candidate.is_dir() or not candidate.name.startswith(allowed_prefixes):
+            if (
+                candidate.is_symlink()
+                or not candidate.is_dir()
+                or generated_name.fullmatch(candidate.name) is None
+            ):
                 continue
             if now - candidate.stat().st_mtime > max_age_seconds:
                 shutil.rmtree(candidate)
@@ -930,7 +935,13 @@ class ProductBundleTransaction:
                 f"Close open output files and retry: {self.target_dir}"
             ) from exc
         if backup is not None and backup.exists():
-            shutil.rmtree(backup)
+            try:
+                shutil.rmtree(backup)
+            except OSError:
+                # The second rename is the commit point. Leave a locked
+                # backup for a later stale-sibling cleanup rather than
+                # reporting an ambiguous failure after commit.
+                pass
 
     def _sibling_path(self, role: str) -> Path:
         return self.target_dir.with_name(
@@ -1417,6 +1428,12 @@ with:
 receipt.payload_build_ms
 ```
 
+Also consume the required product IDs directly:
+
+```python
+len(receipt.product_ids)
+```
+
 - [ ] **Step 4: Clean `ProductExcel` during the green refactor phase**
 
 Add this import to `app/product_excel.py`:
@@ -1489,11 +1506,15 @@ Expected: both commands exit 0 and the verifier reports all configured coverage 
 - [ ] **Step 3: Run product verification and offline benchmark**
 
 ```powershell
-& .\.venv\Scripts\python.exe -m scripts.verify_products
+& .\.venv\Scripts\python.exe -m pytest tests/test_verify_products.py -q
 & .\.venv\Scripts\python.exe -m scripts.benchmark_products --counts 1,5,10 --iterations 5
 ```
 
-Expected: product verification exits 0; benchmark JSON reports `writer_workers` equal to 3, bounded queue depth, and no network/browser activity.
+Expected: the product verifier tests generate known bundles under pytest temporary
+directories and validate them offline; benchmark JSON reports `writer_workers`
+equal to 3, bounded queue depth, and no network/browser activity. For an existing
+bundle, the equivalent CLI check is `python -m scripts.verify_products
+--output-dir <bundle-directory>`.
 
 - [ ] **Step 4: Run dependency, whitespace, artifact, and secret checks**
 
@@ -1535,3 +1556,29 @@ HEAD_SHA: output of git rev-parse HEAD
 ```
 
 Expected: fix all Critical and Important findings, rerun Steps 1–5, then use the branch-finishing workflow to choose merge, PR, or cleanup.
+
+## Completion audit (2026-07-18)
+
+The implementation through `9941e77` was independently reviewed against the
+approved design. The audit found no Critical issues. Both Important transaction
+issues were corrected with test-first regressions:
+
+- stale cleanup now accepts only complete generated UUID sibling names and
+  explicitly skips symbolic links;
+- the second successful rename is the commit point, so a locked obsolete backup
+  is retained for later stale cleanup without reporting an ambiguous write
+  failure.
+
+The audit also removed the benchmark fallback for required `product_ids`, fixed
+the product-verification command above, and updated the CLI receipt comment.
+
+Fresh offline evidence after the corrections:
+
+- full suite: `294 passed`;
+- coverage suite: `294 passed`, with all `scripts.verify_core` thresholds met;
+- product verifier suite: `16 passed`;
+- product benchmark: `writer_workers=3`, `max_queue_depth=2`, and positive median
+  speedups for 1, 5, and 10 products;
+- `pip check`, `git diff --check`, tracked-artifact scan, and new-diff secret scan
+  passed;
+- no live browser or network command was run.

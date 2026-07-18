@@ -254,7 +254,7 @@ def _run_optimized_output(collection, target: Path) -> dict[str, object]:
     sizes = _output_sizes(target)
     total_local_ms = (time.perf_counter() - started) * 1000.0
     return {
-        "records": len(getattr(receipt, "product_ids", collection.records)),
+        "records": len(receipt.product_ids),
         "payload_build_ms": round(
             receipt.payload_build_ms,
             3,

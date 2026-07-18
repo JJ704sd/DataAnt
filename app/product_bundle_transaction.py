@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import sys
 import threading
@@ -105,14 +106,18 @@ class ProductBundleTransaction:
     ) -> tuple[Path, ...]:
         if max_age_seconds <= 0:
             raise ValueError("max_age_seconds must be positive")
-        allowed_prefixes = (
-            f".{self.target_dir.name}.staging-",
-            f".{self.target_dir.name}.backup-",
+        generated_name = re.compile(
+            rf"\.{re.escape(self.target_dir.name)}\."
+            rf"(?:staging|backup)-[0-9a-f]{{32}}"
         )
         now = time.time()
         removed: list[Path] = []
         for candidate in self.target_dir.parent.iterdir():
-            if not candidate.is_dir() or not candidate.name.startswith(allowed_prefixes):
+            if (
+                candidate.is_symlink()
+                or not candidate.is_dir()
+                or generated_name.fullmatch(candidate.name) is None
+            ):
                 continue
             if now - candidate.stat().st_mtime > max_age_seconds:
                 shutil.rmtree(candidate)
@@ -139,7 +144,14 @@ class ProductBundleTransaction:
                 f"Close open output files and retry: {self.target_dir}"
             ) from exc
         if backup is not None and backup.exists():
-            shutil.rmtree(backup)
+            try:
+                shutil.rmtree(backup)
+            except OSError:
+                # The second rename is the commit point. A locked backup is
+                # safe to leave for the bounded stale-sibling cleanup on a
+                # later write; reporting failure here would make the already
+                # committed target outcome ambiguous to the caller.
+                pass
 
     def _sibling_path(self, role: str) -> Path:
         return self.target_dir.with_name(

@@ -8,9 +8,15 @@ live web-scraping.dev host.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import pytest
+
+from app.product_models import ProductCollection, ProductRecord
 from scripts.benchmark_products import (
     _FIXTURE_DIR,
     _parse_one_fixture,
+    _run_optimized_output,
     run_benchmark,
 )
 
@@ -87,7 +93,29 @@ def test_benchmark_rejects_unknown_count() -> None:
 
 
 def test_benchmark_rejects_empty_count_ladder() -> None:
-    import pytest
-
     with pytest.raises(ValueError, match="counts"):
         run_benchmark(counts=(), iterations=1, output_root=None)
+
+
+def test_benchmark_requires_product_ids_in_bundle_receipt(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    incomplete_receipt = SimpleNamespace(
+        payload_build_ms=0.0,
+        json_write_ms=0.0,
+        gallery_write_ms=0.0,
+        excel_write_ms=0.0,
+        verify_ms=0.0,
+    )
+    monkeypatch.setattr(
+        "scripts.benchmark_products.ProductOutputBundle.write",
+        lambda self, collection: incomplete_receipt,
+    )
+    collection = ProductCollection.from_records(
+        [ProductRecord.success_fixture("1")],
+        generated_at="2026-07-18T00:00:00+08:00",
+        blocked=False,
+    )
+
+    with pytest.raises(AttributeError, match="product_ids"):
+        _run_optimized_output(collection, tmp_path)

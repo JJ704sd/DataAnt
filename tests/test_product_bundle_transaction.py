@@ -78,13 +78,15 @@ def test_restore_failure_reports_that_previous_bundle_was_not_restored(
 
 def test_cleanup_only_removes_old_generated_siblings(tmp_path: Path) -> None:
     target = tmp_path / "demo"
-    stale = tmp_path / ".demo.staging-old"
-    fresh = tmp_path / ".demo.backup-fresh"
+    stale = tmp_path / f".demo.staging-{'0' * 32}"
+    fresh = tmp_path / f".demo.backup-{'1' * 32}"
+    malformed = tmp_path / ".demo.staging-not-a-generated-uuid"
     unrelated = tmp_path / ".demo-not-generated"
-    for path in (stale, fresh, unrelated):
+    for path in (stale, fresh, malformed, unrelated):
         path.mkdir()
     old = time.time() - 48 * 60 * 60
     os.utime(stale, (old, old))
+    os.utime(malformed, (old, old))
 
     removed = ProductBundleTransaction(target).cleanup_stale_siblings(
         max_age_seconds=24 * 60 * 60
@@ -93,7 +95,30 @@ def test_cleanup_only_removes_old_generated_siblings(tmp_path: Path) -> None:
     assert removed == (stale,)
     assert not stale.exists()
     assert fresh.exists()
+    assert malformed.exists()
     assert unrelated.exists()
+
+
+def test_backup_cleanup_failure_does_not_make_committed_swap_ambiguous(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "demo"
+    target.mkdir()
+    (target / "old.txt").write_text("old", encoding="utf-8")
+    transaction = ProductBundleTransaction(target)
+
+    monkeypatch.setattr(
+        transaction_module.shutil,
+        "rmtree",
+        lambda path: (_ for _ in ()).throw(PermissionError("backup locked")),
+    )
+
+    with transaction.staging_directory() as staging:
+        (staging / "new.txt").write_text("new", encoding="utf-8")
+        transaction.commit(staging)
+
+    assert (target / "new.txt").read_text(encoding="utf-8") == "new"
+    assert len(list(tmp_path.glob(".demo.backup-*"))) == 1
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows lock semantics only")

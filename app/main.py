@@ -243,9 +243,9 @@ def _execute_products(args: argparse.Namespace, logger) -> int:
         bundle_started = time.perf_counter()
         bundle_receipt = ProductOutputBundle(output_dir).write(collection)
         elapsed_output_ms = (time.perf_counter() - bundle_started) * 1000.0
-        # Read back the three file sizes locally so the metric log stays
-        # strictly numeric. No HTML, cookie, header, profile path, or
-        # API key value is ever read or logged here.
+        # Consume the typed receipt so the metric log stays strictly numeric.
+        # No HTML, cookie, header, profile path, or API key value is read or
+        # logged here.
         bytes_by_file = dict(bundle_receipt.bytes_by_file)
         bundle_bytes = sum(bytes_by_file.values())
         writer_count = len(bytes_by_file)
