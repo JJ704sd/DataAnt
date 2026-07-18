@@ -243,37 +243,20 @@ def _execute_products(args: argparse.Namespace, logger) -> int:
         bundle_started = time.perf_counter()
         bundle_receipt = ProductOutputBundle(output_dir).write(collection)
         elapsed_output_ms = (time.perf_counter() - bundle_started) * 1000.0
+        # Read back the three file sizes locally so the metric log stays
+        # strictly numeric. No HTML, cookie, header, profile path, or
+        # API key value is ever read or logged here.
+        bytes_by_file = dict(bundle_receipt.bytes_by_file)
+        bundle_bytes = sum(bytes_by_file.values())
+        writer_count = len(bytes_by_file)
+        record_count = len(bundle_receipt.product_ids)
+        local_output_ms = bundle_receipt.total_local_ms or elapsed_output_ms
     except OutputLockedError as exc:
         logger.error("Output locked: %s", exc)
         return 4
     except Exception as exc:  # noqa: BLE001 — exit code 5 is the catch-all.
         logger.exception("Unexpected error: %s", exc)
         return 5
-
-    # Read back the three file sizes locally so the metric log stays
-    # strictly numeric. No HTML, cookie, header, profile path, or
-    # API key value is ever read or logged here.
-    receipt_bytes = getattr(bundle_receipt, "bytes_by_file", None)
-    if receipt_bytes is not None:
-        bytes_by_file = dict(receipt_bytes)
-    else:
-        bytes_by_file = {}
-        if output_dir.is_dir():
-            for artifact in sorted(output_dir.iterdir()):
-                if artifact.is_file():
-                    bytes_by_file[artifact.name] = artifact.stat().st_size
-    bundle_bytes = sum(bytes_by_file.values())
-    writer_count = len(bytes_by_file)
-    receipt_ids = getattr(bundle_receipt, "product_ids", None)
-    record_count = (
-        len(receipt_ids)
-        if receipt_ids is not None
-        else collection.summary.total
-    )
-    local_output_ms = (
-        getattr(bundle_receipt, "total_local_ms", 0.0)
-        or elapsed_output_ms
-    )
     logger.info(
         "stage=metrics paced_operations=%s network_retry_count=%s "
         "detail_records=%s discovery_ms=%.3f detail_ms=%.3f",
@@ -291,11 +274,11 @@ def _execute_products(args: argparse.Namespace, logger) -> int:
         writer_count,
         record_count,
         bundle_bytes,
-        getattr(bundle_receipt, "payload_build_ms", 0.0),
-        getattr(bundle_receipt, "json_write_ms", 0.0),
-        getattr(bundle_receipt, "gallery_write_ms", 0.0),
-        getattr(bundle_receipt, "excel_write_ms", 0.0),
-        getattr(bundle_receipt, "verify_ms", 0.0),
+        bundle_receipt.payload_build_ms,
+        bundle_receipt.json_write_ms,
+        bundle_receipt.gallery_write_ms,
+        bundle_receipt.excel_write_ms,
+        bundle_receipt.verify_ms,
     )
 
     if collection.summary.blocked:

@@ -256,23 +256,23 @@ def _run_optimized_output(collection, target: Path) -> dict[str, object]:
     return {
         "records": len(getattr(receipt, "product_ids", collection.records)),
         "payload_build_ms": round(
-            float(getattr(receipt, "payload_build_ms", 0.0)),
+            receipt.payload_build_ms,
             3,
         ),
         "json_write_ms": round(
-            float(getattr(receipt, "json_write_ms", 0.0)),
+            receipt.json_write_ms,
             3,
         ),
         "gallery_write_ms": round(
-            float(getattr(receipt, "gallery_write_ms", 0.0)),
+            receipt.gallery_write_ms,
             3,
         ),
         "excel_write_ms": round(
-            float(getattr(receipt, "excel_write_ms", 0.0)),
+            receipt.excel_write_ms,
             3,
         ),
         "verify_ms": round(
-            float(getattr(receipt, "verify_ms", 0.0)),
+            receipt.verify_ms,
             3,
         ),
         "total_local_ms": round(total_local_ms, 3),

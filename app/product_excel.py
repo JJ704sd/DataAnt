@@ -6,6 +6,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from openpyxl import Workbook, load_workbook
+from openpyxl.worksheet.worksheet import Worksheet
 
 from app.product_models import ProductRecord, ProductStatus
 
@@ -47,7 +48,7 @@ class ProductExcel:
     """
 
     @staticmethod
-    def _workbook_for(path: Path) -> Workbook:
+    def _workbook_for(path: Path) -> tuple[Workbook, Worksheet]:
         workbook = Workbook()
         sheet = workbook.active
         sheet.title = "products"
@@ -116,11 +117,6 @@ class ProductExcel:
                 merged.append(record)
                 seen.add(record.product_id)
         return merged
-
-    @staticmethod
-    def _row_for(record: ProductRecord) -> list[object]:
-        payload = record.to_primitive()
-        return [payload[column] for column in PRODUCT_COLUMNS]
 
     @staticmethod
     def _record_from_row(row: tuple[object, ...]) -> ProductRecord:

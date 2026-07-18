@@ -59,3 +59,11 @@ def test_wrong_existing_schema_is_rejected(tmp_path: Path) -> None:
     workbook.save(path)
     with pytest.raises(ValueError, match="product workbook schema"):
         ProductExcel.read(path)
+
+
+def test_workbook_factory_returns_named_products_sheet(tmp_path: Path) -> None:
+    workbook, sheet = ProductExcel._workbook_for(tmp_path / "products.xlsx")
+
+    assert workbook.active is sheet
+    assert sheet.title == "products"
+    assert [cell.value for cell in sheet[1]] == PRODUCT_COLUMNS

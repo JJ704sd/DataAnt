@@ -10,7 +10,9 @@ from app.excel_store import OutputLockedError
 from app.input_loader import InputError
 from app.main import build_parser, execute
 from app.models import RunSummary, Status, Task
+from app.product_excel import ProductWriteReceipt
 from app.product_models import ProductCollection, ProductRecord, ProductStatus
+from app.product_output_bundle import BundleWriteReceipt
 
 
 def test_run_command_requires_input_and_output() -> None:
@@ -170,6 +172,7 @@ def stub_dependencies(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     _FakeRunner.next_summary = RunSummary(processed=0, skipped=0, blocked=False)
     _FakeBrowserSession.instances.clear()
     _FakeProductRunner.instances.clear()
+    _FakeProductRunner.next_collection_blocked = False
     _FakeProductOutputBundle.instances.clear()
     _FakeProductOutputBundle.raise_on_write = None
     _FakeProductOutputBundle.blocked_flag = False
@@ -507,10 +510,32 @@ class _FakeProductOutputBundle:
         self.write_calls: int = 0
         _FakeProductOutputBundle.instances.append(self)
 
-    def write(self, collection: ProductCollection) -> None:  # type: ignore[override]
+    def write(
+        self, collection: ProductCollection
+    ) -> BundleWriteReceipt:
         self.write_calls += 1
         if _FakeProductOutputBundle.raise_on_write is not None:
             raise _FakeProductOutputBundle.raise_on_write
+        product_ids = tuple(record.product_id for record in collection.records)
+        return BundleWriteReceipt(
+            product_ids=product_ids,
+            excel=ProductWriteReceipt(
+                product_ids=product_ids,
+                row_count=len(product_ids),
+                bytes_written=100,
+            ),
+            bytes_by_file={
+                "products.xlsx": 100,
+                "products.json": 200,
+                "gallery.html": 300,
+            },
+            payload_build_ms=1.0,
+            json_write_ms=2.0,
+            gallery_write_ms=3.0,
+            excel_write_ms=4.0,
+            verify_ms=5.0,
+            total_local_ms=15.0,
+        )
 
 
 def products_live_args(
@@ -774,3 +799,34 @@ def test_collect_products_returns_5_for_unexpected_runner_error(
 
     assert rc == 5
     assert _FakeProductOutputBundle.instances == []
+
+
+def test_collect_products_rejects_incomplete_bundle_receipt(
+    stub_dependencies: dict,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class IncompleteBundle(_FakeProductOutputBundle):
+        def write(self, collection: ProductCollection) -> object:
+            self.write_calls += 1
+            return object()
+
+    monkeypatch.setattr(main, "ProductOutputBundle", IncompleteBundle)
+
+    rc = execute(products_live_args(stub_dependencies))
+
+    assert rc == 5
+
+
+def test_collect_products_uses_required_bundle_receipt_fields(
+    stub_dependencies: dict,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO)
+
+    rc = execute(products_live_args(stub_dependencies))
+
+    assert rc == 0
+    assert "local_output_ms=15.000" in caplog.text
+    assert "writers=3" in caplog.text
+    assert "records=1" in caplog.text
+    assert "bundle_bytes=600" in caplog.text
