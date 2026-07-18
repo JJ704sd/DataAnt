@@ -12,39 +12,32 @@ process has the workbook open), the backup is restored and a
 :class:`OutputLockedError` is raised so the caller can surface the
 existing ``OUTPUT_LOCKED`` semantic without losing the prior bundle.
 
-Task 4 of the product output pipeline refactor moved the target
-locking, staging lifecycle, atomic swap, rollback, and stale sibling
-cleanup into :mod:`app.product_bundle_transaction`. This module now
-delegates the lock and transaction concerns to
-:class:`ProductBundleTransaction` and keeps the writer/verifier
-orchestration in place until Task 5 fully replaces this façade.
+This module is a thin orchestration façade. The immutable payload
+snapshot lives in :mod:`app.product_output_snapshot`, the bounded
+local artifact generation lives in :mod:`app.product_artifact_writers`,
+the staging consistency check lives in :mod:`app.product_bundle_verifier`,
+and the target locking, staging lifecycle, atomic swap, rollback, and
+stale sibling cleanup live in :mod:`app.product_bundle_transaction`.
 """
 
 from __future__ import annotations
 
-import json
 import time
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, TypeVar
 
-from app.excel_store import OutputLockedError
+from app.product_artifact_writers import ProductArtifactWriters
 from app.product_bundle_transaction import ProductBundleTransaction
+from app.product_bundle_verifier import ProductBundleVerifier
 from app.product_excel import ProductExcel, ProductWriteReceipt
-from app.product_gallery import render_gallery
-from app.product_json import (
-    ProductOutputSnapshot,
-    build_product_output_snapshot,
-)
 from app.product_models import ProductCollection, ProductRecord
+from app.product_output_snapshot import build_product_output_snapshot
 
 
 # Hard cap on the merged bundle. Mirrors the controlled
 # ``--max-products`` ceiling (1..10) so multi-run accumulation cannot
 # silently exceed the approved batch size.
 BUNDLE_LIMIT: int = 10
-_T = TypeVar("_T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,36 +45,12 @@ class BundleWriteReceipt:
     product_ids: tuple[str, ...]
     excel: ProductWriteReceipt
     bytes_by_file: dict[str, int]
-    payload_build_ms: float = 0.0
-    json_write_ms: float = 0.0
-    gallery_write_ms: float = 0.0
-    excel_write_ms: float = 0.0
-    verify_ms: float = 0.0
-    total_local_ms: float = 0.0
-
-
-def _write_text(path: Path, content: str) -> int:
-    path.write_text(content, encoding="utf-8")
-    return path.stat().st_size
-
-
-def _render_and_write_gallery(
-    collection: ProductCollection,
-    directory: Path,
-    snapshot: ProductOutputSnapshot,
-) -> int:
-    return _write_text(
-        directory / "gallery.html",
-        render_gallery(collection, snapshot=snapshot),
-    )
-
-
-def _timed_call(
-    function: Callable[..., _T], *args: object, **kwargs: object
-) -> tuple[_T, float]:
-    started = time.perf_counter()
-    result = function(*args, **kwargs)
-    return result, (time.perf_counter() - started) * 1000.0
+    payload_build_ms: float
+    json_write_ms: float
+    gallery_write_ms: float
+    excel_write_ms: float
+    verify_ms: float
+    total_local_ms: float
 
 
 class ProductOutputBundle:
@@ -144,21 +113,27 @@ class ProductOutputBundle:
 
         self.cleanup_stale_siblings(max_age_seconds=24 * 60 * 60)
 
-        with self._transaction.staging_directory() as staging_dir:
-            receipt = self._write_three(
+        with self._transaction.staging_directory() as staging:
+            artifact_receipt = ProductArtifactWriters.write(
                 merged_collection,
-                staging_dir,
+                staging,
                 snapshot=snapshot,
             )
-            verify_started = time.perf_counter()
-            self._verify_consistent(snapshot, receipt, staging_dir)
-            verify_ms = (time.perf_counter() - verify_started) * 1000.0
+            verify_ms = ProductBundleVerifier.verify(
+                snapshot,
+                artifact_receipt,
+                staging,
+            )
+            self._transaction.commit(staging)
 
-            self._transaction.commit(staging_dir)
-
-        return replace(
-            receipt,
+        return BundleWriteReceipt(
+            product_ids=artifact_receipt.product_ids,
+            excel=artifact_receipt.excel,
+            bytes_by_file=dict(artifact_receipt.bytes_by_file),
             payload_build_ms=payload_build_ms,
+            json_write_ms=artifact_receipt.json_write_ms,
+            gallery_write_ms=artifact_receipt.gallery_write_ms,
+            excel_write_ms=artifact_receipt.excel_write_ms,
             verify_ms=verify_ms,
             total_local_ms=(time.perf_counter() - started) * 1000.0,
         )
@@ -174,78 +149,6 @@ class ProductOutputBundle:
         return ProductExcel.merge_existing(
             existing_workbook, list(new_collection.records)
         )
-
-    @staticmethod
-    def _write_three(
-        collection: ProductCollection,
-        directory: Path,
-        *,
-        snapshot: ProductOutputSnapshot,
-    ) -> BundleWriteReceipt:
-        executor = ThreadPoolExecutor(
-            max_workers=3,
-            thread_name_prefix="product-output",
-        )
-        try:
-            excel_future = executor.submit(
-                _timed_call,
-                ProductExcel.write,
-                directory / "products.xlsx",
-                list(collection.records),
-                primitive_rows=snapshot.product_rows,
-            )
-            json_future = executor.submit(
-                _timed_call,
-                _write_text,
-                directory / "products.json",
-                snapshot.json_text,
-            )
-            gallery_future = executor.submit(
-                _timed_call,
-                _render_and_write_gallery,
-                collection,
-                directory,
-                snapshot,
-            )
-            excel_receipt, excel_ms = excel_future.result()
-            json_bytes, json_ms = json_future.result()
-            gallery_bytes, gallery_ms = gallery_future.result()
-        finally:
-            executor.shutdown(wait=True, cancel_futures=True)
-        return BundleWriteReceipt(
-            product_ids=snapshot.product_ids,
-            excel=excel_receipt,
-            bytes_by_file={
-                "products.xlsx": excel_receipt.bytes_written,
-                "products.json": json_bytes,
-                "gallery.html": gallery_bytes,
-            },
-            json_write_ms=json_ms,
-            gallery_write_ms=gallery_ms,
-            excel_write_ms=excel_ms,
-        )
-
-    @staticmethod
-    def _verify_consistent(
-        snapshot: ProductOutputSnapshot,
-        receipt: BundleWriteReceipt,
-        directory: Path,
-    ) -> None:
-        expected_ids = list(snapshot.product_ids)
-        if list(receipt.excel.product_ids) != expected_ids:
-            raise ValueError("staging Excel IDs do not match snapshot")
-        payload = json.loads(
-            (directory / "products.json").read_text(encoding="utf-8")
-        )
-        json_ids = [
-            str(item.get("product_id"))
-            for item in payload.get("products", [])
-        ]
-        if json_ids != expected_ids:
-            raise ValueError("staging JSON IDs do not match snapshot")
-        for filename in ("products.xlsx", "products.json", "gallery.html"):
-            if not (directory / filename).is_file():
-                raise ValueError(f"staging output is missing {filename}")
 
 
 __all__ = [
