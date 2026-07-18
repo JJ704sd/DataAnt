@@ -4,7 +4,7 @@ import html
 from datetime import datetime
 from typing import Final
 
-from app.product_json import (
+from app.product_output_snapshot import (
     ProductOutputSnapshot,
     build_product_output_snapshot,
 )

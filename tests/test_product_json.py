@@ -59,3 +59,17 @@ def test_render_product_json_is_compact_without_schema_change() -> None:
     assert payload["products"][0]["product_id"] == "1"
     assert "\n  " not in rendered
     assert rendered.endswith("\n")
+
+
+def test_product_json_reexports_snapshot_api() -> None:
+    from app import product_json, product_output_snapshot
+
+    assert (
+        product_json.ProductOutputSnapshot
+        is product_output_snapshot.ProductOutputSnapshot
+    )
+    assert (
+        product_json.build_product_output_snapshot
+        is product_output_snapshot.build_product_output_snapshot
+    )
+    assert product_json.product_payload is product_output_snapshot.product_payload
