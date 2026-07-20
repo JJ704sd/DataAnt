@@ -1,7 +1,7 @@
 # browser-bot-demo
 
 > 受控的豆瓣电影小助手 Demo：新人 30 分钟内即可读懂前置条件、安装、离线验证、受控运行、断点续跑、显式重试与故障处置。
-> 本文档面向需要在本仓库 `D:\DataAnt\.worktrees\browser-bot-demo` 中复现 Demo 的人；所有命令均假定在 PowerShell 中以工作目录为根执行。
+> 本文档面向需要在本仓库 `D:\DataAnt` 中复现 Demo 的人；所有命令均假定在 PowerShell 中以工作目录为根执行。
 
 ---
 
@@ -26,12 +26,12 @@
 
 ## 2. Install & 离线检查
 
-下列命令在仓库根目录 `D:\DataAnt\.worktrees\browser-bot-demo` 下以 PowerShell 执行。**安装命令仅在首次克隆或重建环境时执行一次**；本任务以及 CI 中都禁止重建 venv 或重装依赖。
+下列命令在仓库根目录 `D:\DataAnt` 下以 PowerShell 执行。**安装命令仅在首次克隆或重建环境时执行一次**；本任务以及 CI 中都禁止重建 venv 或重装依赖。
 
 ```powershell
-Set-Location -LiteralPath 'D:\DataAnt\.worktrees\browser-bot-demo'
+Set-Location -LiteralPath 'D:\DataAnt'
 py -3.12 -m venv .venv
-& 'D:\DataAnt\.worktrees\browser-bot-demo\.venv\Scripts\Activate.ps1'
+& 'D:\DataAnt\.venv\Scripts\Activate.ps1'
 python -m pip install -e ".[dev]"
 python -m pytest -q
 python -m app.main run --help
@@ -123,11 +123,11 @@ python -m app.main run --input .\inputs\queries.example.csv --output .\outputs\d
 - 诊断路径**仅限定在仓库内 `artifacts/` 目录**，不得指向目录外路径。下列命令**先预览再删除**，**不**跟随 `artifacts/` 之外的路径：
   ```powershell
   # 预览：列出 7 天前的失败产物（不会删除）
-  Get-ChildItem -LiteralPath 'D:\DataAnt\.worktrees\browser-bot-demo\artifacts' -File -Recurse |
+  Get-ChildItem -LiteralPath 'D:\DataAnt\artifacts' -File -Recurse |
       Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } |
       Select-Object FullName, LastWriteTime
   # 删除：确认上面输出后，单独跑
-  Get-ChildItem -LiteralPath 'D:\DataAnt\.worktrees\browser-bot-demo\artifacts' -File -Recurse |
+  Get-ChildItem -LiteralPath 'D:\DataAnt\artifacts' -File -Recurse |
       Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-7) } |
       Remove-Item -Force
   ```
